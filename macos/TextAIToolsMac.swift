@@ -739,7 +739,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
 
         // Global Hotkey check (customizable, defaults to Right Cmd + .)
-        if !isRecordingHotkey && matchesHotkey(keyCode: keyCode, flags: flags) {
+        if !isRecordingHotkey && matchesHotkey(keyCode: keyCode, flags: flags, event: event) {
             wordBuffer = ""
             lastUndo = nil
             DispatchQueue.main.async { [weak self] in
@@ -1217,8 +1217,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Customizable Shortcut Recorder
 
-    private func matchesHotkey(keyCode: Int64, flags: CGEventFlags) -> Bool {
-        guard keyCode == hotkey.keyCode else { return false }
+    private func matchesHotkey(keyCode: Int64, flags: CGEventFlags, event: CGEvent) -> Bool {
+        var keyMatches = (keyCode == hotkey.keyCode)
+        if !keyMatches && hotkey.keyCode == 47 {
+            if let ch = NSEvent(cgEvent: event)?.charactersIgnoringModifiers, ch == "." {
+                keyMatches = true
+            }
+        }
+        guard keyMatches else { return false }
         if flags.contains(.maskCommand) != hotkey.cmd { return false }
         if flags.contains(.maskAlternate) != hotkey.opt { return false }
         if flags.contains(.maskControl) != hotkey.ctrl { return false }
