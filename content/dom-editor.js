@@ -1040,29 +1040,10 @@
   function getCaretOrSelectionRect(el, rangeSnapshot) {
     const host = resolveEditableTarget(el);
     if (!host) {
-      const domRange = rangeSnapshot?.domRange;
-      if (domRange) {
-        if (typeof domRange.getClientRects === "function") {
-          const clientRects = Array.from(domRange.getClientRects()).filter(
-            (cr) => cr && (cr.width > 0 || cr.height > 0)
-          );
-          if (clientRects.length > 0) {
-            const last = clientRects[clientRects.length - 1];
-            return {
-              top: last.top,
-              left: last.left,
-              bottom: last.bottom,
-              right: last.right,
-              width: last.width,
-              height: last.height
-            };
-          }
-        }
-        if (typeof domRange.getBoundingClientRect === "function") {
-          const r = domRange.getBoundingClientRect();
-          if (r && (r.width > 0 || r.height > 0)) {
-            return { top: r.top, left: r.left, bottom: r.bottom, right: r.right, width: r.width, height: r.height };
-          }
+      if (rangeSnapshot?.domRange && typeof rangeSnapshot.domRange.getBoundingClientRect === "function") {
+        const r = rangeSnapshot.domRange.getBoundingClientRect();
+        if (r && (r.width > 0 || r.height > 0)) {
+          return { top: r.top, left: r.left, bottom: r.bottom, right: r.right, width: r.width, height: r.height };
         }
       }
       return null;
