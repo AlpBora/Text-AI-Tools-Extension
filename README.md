@@ -24,22 +24,22 @@ Works with **any AI provider / model** (bring your own API key or local model) i
 
 <p align="center">
   <em>Offline spellchecker flags uncertain words with a wavy underline and shows local candidates (plus optional AI context lookup):</em><br/>
-  <img src="assets/screenshot-uncertain-word.jpg" alt="Uncertain Word Suggestions" width="480" />
+  <img src="assets/screenshot-uncertain-word.jpg" alt="Uncertain Word Suggestions" width="640" />
 </p>
 
 <p align="center">
   <em>Select text on any webpage and click <code>✦</code> to translate, summarize, or extract key points inline:</em><br/>
-  <img src="assets/screenshot-browser-selection.jpg" alt="Browser Selection Menu" width="480" />
+  <img src="assets/screenshot-browser-selection.jpg" alt="Browser Selection Menu" width="640" />
 </p>
 
 <p align="center">
   <em>Quick-access popup for running AI actions on pasted text or checking extension shortcuts:</em><br/>
-  <img src="assets/screenshot-popup.jpg" alt="Extension Popup" width="480" />
+  <img src="assets/screenshot-popup.jpg" alt="Extension Popup" width="340" />
 </p>
 
 <p align="center">
   <em>Configure your AI provider, model, primary/secondary languages, and local spellcheck behavior:</em><br/>
-  <img src="assets/screenshot-settings.jpg" alt="Extension Settings" width="480" />
+  <img src="assets/screenshot-settings.jpg" alt="Extension Settings" width="360" />
 </p>
 
 ---
@@ -73,7 +73,7 @@ On first launch, go to **System Settings → Privacy & Security** and enable **T
 
 <p align="center">
   <em>Press <code>Right ⌘ + .</code> in any macOS app to open the floating liquid-glass AI menu:</em><br/>
-  <img src="assets/screenshot-macos-menu.jpg" alt="macOS Floating Menu" width="480" />
+  <img src="assets/screenshot-macos-menu.jpg" alt="macOS Floating Menu" width="640" />
 </p>
 
 ---
