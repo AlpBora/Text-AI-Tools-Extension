@@ -1,11 +1,19 @@
-import { callGemini, getSettings } from "./shared/actions.js";
+import {
+  AI_PROVIDERS,
+  callAI,
+  detectProviderFromApiKey,
+  getSettings,
+  resolveProviderConfig
+} from "./shared/actions.js";
 
 export function getShortcutsUrl(
   userAgent = typeof navigator !== "undefined" ? navigator.userAgent : ""
 ) {
-  return String(userAgent || "").includes("OPR/")
-    ? "opera://extensions/shortcuts"
-    : "chrome://extensions/shortcuts";
+  const ua = String(userAgent || "");
+  if (ua.includes("OPR/")) return "opera://extensions/shortcuts";
+  if (ua.includes("Edg/")) return "edge://extensions/shortcuts";
+  if (ua.includes("Vivaldi/")) return "vivaldi://extensions/shortcuts";
+  return "chrome://extensions/shortcuts";
 }
 
 function initPopup() {
@@ -38,8 +46,9 @@ function initPopup() {
   }
 
   async function refreshApiBanner() {
-    const { apiKey, primaryLanguage, secondaryLanguage } = await getSettings();
-    apiBanner.classList.toggle("hidden", Boolean(apiKey));
+    const { apiKey, provider, customBaseUrl, primaryLanguage, secondaryLanguage } = await getSettings();
+    const providerCfg = resolveProviderConfig(provider, customBaseUrl);
+    apiBanner.classList.toggle("hidden", !providerCfg.requiresKey || Boolean(apiKey));
     if (translateBtn) {
       translateBtn.textContent = `Translate (${primaryLanguage} ↔ ${secondaryLanguage})`;
     }
@@ -51,7 +60,13 @@ function initPopup() {
       setStatus("Please enter a valid API key.", "err");
       return;
     }
-    await chrome.storage.local.set({ apiKey: key });
+    const detected = detectProviderFromApiKey(key);
+    const updates = { apiKey: key };
+    if (detected && AI_PROVIDERS[detected]) {
+      updates.provider = detected;
+      updates.model = AI_PROVIDERS[detected].defaultModel;
+    }
+    await chrome.storage.local.set(updates);
     quickKeyInput.value = "";
     await refreshApiBanner();
     setStatus("API key saved.", "ok");
@@ -67,16 +82,19 @@ function initPopup() {
       }
 
       const settings = await getSettings();
-      if (!settings.apiKey) {
+      const providerCfg = resolveProviderConfig(settings.provider, settings.customBaseUrl);
+      if (providerCfg.requiresKey && !settings.apiKey) {
         apiBanner.classList.remove("hidden");
-        setStatus("Please save your Gemini API key first.", "err");
+        setStatus(`Please save your ${providerCfg.label} API key first.`, "err");
         return;
       }
 
       setBusy(true);
       setStatus("Processing...");
       try {
-        const result = await callGemini({
+        const result = await callAI({
+          provider: settings.provider,
+          customBaseUrl: settings.customBaseUrl,
           apiKey: settings.apiKey,
           model: settings.model,
           actionId,
@@ -108,8 +126,20 @@ function initPopup() {
     chrome.runtime.openOptionsPage();
   });
 
-  openShortcutsBtn?.addEventListener("click", () => {
-    chrome.tabs.create({ url: getShortcutsUrl() });
+  openShortcutsBtn?.addEventListener("click", async () => {
+    const url = getShortcutsUrl();
+    try {
+      const tab = await chrome.tabs.create({ url });
+      if (tab) return;
+    } catch {
+      // Some Chromium browsers disallow programmatic navigation to chrome:// URLs
+    }
+    try {
+      await navigator.clipboard.writeText(url);
+      setStatus(`Copied ${url} — paste it in the address bar.`, "ok");
+    } catch {
+      setStatus(`Open ${url} in your browser's address bar.`, "err");
+    }
   });
 
   refreshApiBanner();
