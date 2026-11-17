@@ -164,6 +164,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var toggleItem: NSMenuItem!
     private var skipBrowsersItem: NSMenuItem!
     private var statusMenuItem: NSMenuItem!
+    private var retryTimer: Timer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let rootDir = (Bundle.main.object(forInfoDictionaryKey: "TextAIToolsRootDir") as? String)
@@ -173,6 +174,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         setupMenuBar()
         requestAccessibilityIfNeeded()
         startEventTap()
+        if eventTap == nil {
+            retryTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+                guard let self = self else { return }
+                if self.eventTap == nil {
+                    self.startEventTap()
+                } else {
+                    self.retryTimer?.invalidate()
+                    self.retryTimer = nil
+                }
+            }
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -246,6 +258,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
             _ = AXIsProcessTrustedWithOptions(opts)
         }
+        if #available(macOS 10.15, *) {
+            if !CGPreflightListenEventAccess() {
+                CGRequestListenEventAccess()
+            }
+        }
         if eventTap == nil {
             startEventTap()
         }
@@ -256,7 +273,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             alert.informativeText = "Accessibility & Keyboard Tap are active. Note: Chrome/Opera are skipped by default so the browser extension handles them."
         } else {
             alert.messageText = "Permission Required"
-            alert.informativeText = "Enable Text AI Tools in System Settings → Privacy & Security → Accessibility AND Input Monitoring, then click 'Check / Retry Permissions' (or relaunch)."
+            alert.informativeText = "In System Settings → Privacy & Security, turn ON 'Text AI Tools' under BOTH Accessibility AND Input Monitoring (Giriş İzleme). If it's already ON, remove it with '-' and re-add ~/Applications/TextAIToolsMac.app."
         }
         alert.runModal()
     }
@@ -269,6 +286,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if !AXIsProcessTrusted() {
             let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
             _ = AXIsProcessTrustedWithOptions(opts)
+        }
+        if #available(macOS 10.15, *) {
+            if !CGPreflightListenEventAccess() {
+                CGRequestListenEventAccess()
+            }
         }
     }
 
