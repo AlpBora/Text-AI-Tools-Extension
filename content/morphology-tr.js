@@ -1488,10 +1488,164 @@
     return [{ valid: false }];
   }
 
+  function getForeignStemPronouncedLastVowel(rawStem) {
+    const low = trLower(rawStem);
+    if (!low) return "e";
+    // Handle silent final -e in English/Latin words (e.g., iPhone -> o, Chrome -> o, YouTube -> u, Google -> o, Apple -> a)
+    let effective = low;
+    if (
+      effective.length >= 4 &&
+      effective.endsWith("e") &&
+      !VOWELS.has(effective[effective.length - 2]) &&
+      countVowels(effective.slice(0, -1)) >= 1
+    ) {
+      effective = effective.slice(0, -1);
+    }
+    return getLastVowel(effective);
+  }
+
+  function analyzeOrRepairForeignApostrophe(rawStem, rawSuffix) {
+    const stemLow = trLower(rawStem);
+    const sufLow = trLower(rawSuffix);
+    if (!stemLow || !sufLow) return { valid: false, candidates: [] };
+    if (!/^[a-zçğıöşüâîû]+$/.test(sufLow)) return { valid: false, candidates: [] };
+
+    const lastVowel = getForeignStemPronouncedLastVowel(rawStem);
+    const virtualEntry = { stem: stemLow, pos: "P", flags: {} };
+
+    // 1. Exact check
+    const exactInit = makeState("NOM_STEM", stemLow, lastVowel, "P", {}, virtualEntry, [], {
+      strictExact: true,
+      hasApostrophe: true,
+    });
+    const exactStack = [{ state: exactInit, pos: 0 }];
+    const exactVisited = new Set();
+    while (exactStack.length > 0) {
+      const { state, pos } = exactStack.pop();
+      if (pos === sufLow.length) {
+        if (isAcceptingState(state)) {
+          return { valid: true, candidates: [] };
+        }
+        continue;
+      }
+      const vKey = `${state.fsmState}|${pos}|${state.lastVowel}`;
+      if (exactVisited.has(vKey)) continue;
+      exactVisited.add(vKey);
+      const remSlice = sufLow.slice(pos);
+      for (const tr of getTransitions(state)) {
+        if (tr.consumedSurface && remSlice.startsWith(tr.consumedSurface)) {
+          exactStack.push({ state: tr.nextState, pos: pos + tr.consumedSurface.length });
+        }
+      }
+    }
+
+    // 2. Folded / phonological repair on the suffix
+    const sufFold = trFold(sufLow);
+    const foldInit = makeState("NOM_STEM", "", lastVowel, "P", {}, virtualEntry, [], {
+      strictExact: false,
+      hasApostrophe: true,
+    });
+    const foldStack = [{ state: foldInit, pos: 0, cost: 0 }];
+    const foldVisited = new Map();
+    const candMap = new Map();
+
+    while (foldStack.length > 0) {
+      const { state, pos, cost } = foldStack.pop();
+      if (cost > 0.65) continue;
+      if (pos === sufFold.length) {
+        if (isAcceptingState(state) && state.surface) {
+          const candSuf = state.surface;
+          const isPureFold = trFold(candSuf) === sufFold;
+          const score = Number((isPureFold ? 0.96 : 0.85 - cost * 0.3).toFixed(4));
+          const prev = candMap.get(candSuf);
+          if (!prev || score > prev.score) {
+            candMap.set(candSuf, { suffix: candSuf, score, pureFold: isPureFold });
+          }
+        }
+        continue;
+      }
+      const vKey = `${state.fsmState}|${pos}|${state.lastVowel}`;
+      const prevC = foldVisited.get(vKey);
+      if (prevC !== undefined && cost >= prevC) continue;
+      foldVisited.set(vKey, cost);
+
+      const remSlice = sufFold.slice(pos);
+      for (const tr of getTransitions(state)) {
+        if (!tr.consumedSurface) continue;
+        const m = matchFuzzySuffixPrefix(remSlice, tr.consumedSurface);
+        if (m && cost + m.cost <= 0.65) {
+          foldStack.push({ state: tr.nextState, pos: pos + m.consumed, cost: cost + m.cost });
+        }
+      }
+    }
+
+    const candidates = Array.from(candMap.values()).sort((a, b) => b.score - a.score);
+    return { valid: false, candidates };
+  }
+
+  function repairStandaloneSuffixChain(word) {
+    if (!word || typeof word !== "string") return [];
+    const low = trLower(word.trim());
+    if (low.length < 5 || !/^[a-zçğıöşüâîû]+$/.test(low)) return [];
+    const folded = trFold(low);
+    // Must begin with a productive Turkish derivational suffix (e.g. -leş, -laş, -len, -lan, -lik, -lık, -luk, -lük, -siz, -sız, -ci, -cı)
+    if (!/^(?:les|las|len|lan|lik|lik|luk|siz|siz|suz|ci|ci|cu|sel|sal)/.test(folded)) {
+      return [];
+    }
+
+    // Infer virtual stem vowel from the first vowel of the suffix chain
+    let firstV = "e";
+    for (let i = 0; i < low.length; i++) {
+      if (VOWELS.has(low[i])) {
+        firstV = low[i];
+        break;
+      }
+    }
+    const stemVowel = FRONT_VOWELS.has(firstV) ? "e" : "a";
+    const virtualEntry = { stem: "", pos: "N", flags: {} };
+    const init = makeState("NOM_STEM", "k", stemVowel, "N", {}, virtualEntry, [], {
+      strictExact: false,
+      hasApostrophe: false,
+    });
+    init.surface = "";
+
+    const stack = [{ state: init, pos: 0 }];
+    const visited = new Set();
+    const out = new Map();
+
+    while (stack.length > 0) {
+      const { state, pos } = stack.pop();
+      if (pos === folded.length) {
+        if (isAcceptingState(state) && state.surface && state.surface !== low) {
+          if (trFold(state.surface) === folded) {
+            out.set(state.surface, { word: state.surface, score: 0.94, reason: "folded_morph" });
+          }
+        }
+        continue;
+      }
+      const vKey = `${state.fsmState}|${pos}|${state.lastVowel}`;
+      if (visited.has(vKey)) continue;
+      visited.add(vKey);
+
+      const remSlice = folded.slice(pos);
+      for (const tr of getTransitions(state)) {
+        if (!tr.consumedSurface) continue;
+        const expFold = trFold(tr.consumedSurface);
+        if (remSlice.startsWith(expFold)) {
+          stack.push({ state: tr.nextState, pos: pos + expFold.length });
+        }
+      }
+    }
+
+    return Array.from(out.values());
+  }
+
   const TurkishMorphology = {
     isValidWord,
     analyze,
     generateInflectedCandidates,
+    analyzeOrRepairForeignApostrophe,
+    repairStandaloneSuffixChain,
     trLower,
     trFold,
   };

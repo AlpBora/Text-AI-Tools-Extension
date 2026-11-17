@@ -489,6 +489,40 @@ describe("M2: Turkish Morphology, Deasciifier, Homographs & Ambiguity Integratio
     });
     assert.equal(onceStrongEn.decision, "valid");
   });
+
+  it("handles Turkish suffixes on foreign/proper-noun apostrophe stems (Hogwarts'i -> Hogwarts'ı) and standalone suffix chains (lestirilmemis -> leştirilmemiş)", () => {
+    const hogwartsRes = SpellcheckEngine.checkWord({
+      word: "Hogwarts'i",
+      contextTokens: ["enflasyon"],
+      primaryLang: "tr",
+      secondaryLang: "en",
+      lexiconsByLang: LEXICONS,
+      autoCorrectEnabled: true,
+    });
+    assert.equal(hogwartsRes.decision, "auto_correct");
+    assert.equal(hogwartsRes.replacement, "Hogwarts'ı");
+
+    const googleValid = SpellcheckEngine.checkWord({
+      word: "Google'da",
+      contextTokens: ["bunu"],
+      primaryLang: "tr",
+      secondaryLang: "en",
+      lexiconsByLang: LEXICONS,
+      autoCorrectEnabled: true,
+    });
+    assert.equal(googleValid.decision, "valid");
+
+    const chainRes = SpellcheckEngine.checkWord({
+      word: "lestirilmemis",
+      contextTokens: ["ringwraith"],
+      primaryLang: "tr",
+      secondaryLang: "en",
+      lexiconsByLang: LEXICONS,
+      autoCorrectEnabled: true,
+    });
+    assert.equal(chainRes.decision, "auto_correct");
+    assert.equal(chainRes.replacement, "leştirilmemiş");
+  });
 });
 
 describe("M2: Bilingual Code-Switching & Custom Unbundled Languages", () => {

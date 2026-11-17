@@ -830,6 +830,24 @@
           });
         }
       }
+
+      if (morph && typeof morph.repairStandaloneSuffixChain === "function" && !cleanWord.includes("'")) {
+        const chainRes = morph.repairStandaloneSuffixChain(cleanWord);
+        for (const ch of chainRes) {
+          const cLower = trLower(ch.word);
+          candidates.push({
+            word: applyCasing(cLower, cleanWord, "tr"),
+            lowerWord: cLower,
+            score: 0.97,
+            source: "colloquial",
+            lang: "tr",
+            freq: 500,
+            weightedDist: 0.15,
+            rawDist: 1,
+            morphAllowAutoCorrect: true,
+          });
+        }
+      }
     }
 
     // --- G1: Exact & Diacritic-Folded Lookup ---
@@ -1131,6 +1149,67 @@
           detectedLang: langId,
           candidates: [],
         };
+      }
+    }
+
+    // 1b. Foreign / Proper-Noun Stem + Turkish Apostrophe Suffix (e.g. Hogwarts'i -> Hogwarts'ı, Google'da -> valid)
+    const apoIdx = cleanWord.indexOf("'");
+    if (
+      apoIdx > 0 &&
+      apoIdx < cleanWord.length - 1 &&
+      activeWithLexicon.includes("tr") &&
+      morph &&
+      typeof morph.analyzeOrRepairForeignApostrophe === "function"
+    ) {
+      const rawStem = cleanWord.slice(0, apoIdx);
+      const rawSuffix = cleanWord.slice(apoIdx + 1);
+      const stemHasTrDeasc =
+        deasciifier &&
+        typeof deasciifier.deasciifyWord === "function" &&
+        deasciifier.deasciifyWord(rawStem, normLexicons.tr, morph).status !== "unchanged";
+      const isKnownStem = activeWithLexicon.some((lid) =>
+        isValidInSingleLexicon(rawStem, lid, normLexicons[lid], getProfile(lid), morph)
+      );
+      const isCapitalizedProper = /^\p{Lu}/u.test(rawStem) && rawStem.length >= 2;
+      if (!stemHasTrDeasc && (isKnownStem || isCapitalizedProper || (guess.primary === "tr" && rawStem.length >= 3))) {
+        const apoRes = morph.analyzeOrRepairForeignApostrophe(rawStem, rawSuffix);
+        if (apoRes.valid) {
+          return {
+            valid: true,
+            decision: "valid",
+            detectedLang: "tr",
+            candidates: [],
+          };
+        }
+        if (apoRes.candidates && apoRes.candidates.length > 0) {
+          const topApo = apoRes.candidates[0];
+          const secondApo = apoRes.candidates[1] || null;
+          const mappedCands = apoRes.candidates.slice(0, 5).map((c) => ({
+            word: `${rawStem}'${c.suffix}`,
+            score: c.score,
+            source: "morph",
+            lang: "tr",
+          }));
+          const canAuto =
+            autoCorrectEnabled &&
+            (topApo.pureFold || topApo.score >= 0.84) &&
+            (!secondApo || topApo.score - secondApo.score >= 0.04);
+          if (canAuto) {
+            return {
+              valid: false,
+              decision: "auto_correct",
+              detectedLang: "tr",
+              replacement: mappedCands[0].word,
+              candidates: mappedCands,
+            };
+          }
+          return {
+            valid: false,
+            decision: "uncertain",
+            detectedLang: "tr",
+            candidates: mappedCands,
+          };
+        }
       }
     }
 
