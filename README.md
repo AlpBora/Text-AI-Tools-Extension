@@ -20,6 +20,7 @@ Works with **any AI provider / model** (bring your own API key or local model) i
 ### Usage
 - **Auto-Correct:** Just type normally in any text box; spellcheck runs locally on your machine at word boundaries (no API calls).
 - **AI Actions:** Select text or place the cursor at the end of a sentence and click **`✦`**, right-click → **Text AI Tools**, or use the extension popup.
+- **Updates:** Automatically reloads when disk files update (e.g. synced by the Mac app) and shows an **Update** banner in the popup when a newer version is available on GitHub.
 
 ---
 
