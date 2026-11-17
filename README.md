@@ -22,10 +22,16 @@ Works with **any AI provider / model** (bring your own API key or local model) i
 - **AI Actions:** Select text or place the cursor at the end of a sentence and click **`✦`**, right-click → **Text AI Tools**, or use the extension popup.
 - **Updates:** Automatically reloads when disk files update (e.g. synced by the Mac app) and shows an **Update** banner in the popup when a newer version is available on GitHub.
 
+*Offline spellchecker flags uncertain words with a wavy underline and shows local candidates (plus optional AI context lookup):*
+![Uncertain Word Suggestions](assets/screenshot-uncertain-word.jpg)
+
+*Select text on any webpage and click `✦` to translate, summarize, or extract key points inline:*
 ![Browser Selection Menu](assets/screenshot-browser-selection.jpg)
 
+*Quick-access popup for running AI actions on pasted text or checking extension shortcuts:*
 ![Extension Popup](assets/screenshot-popup.jpg)
 
+*Configure your AI provider, model, primary/secondary languages, and local spellcheck behavior:*
 ![Extension Settings](assets/screenshot-settings.jpg)
 
 ---
@@ -53,6 +59,7 @@ On first launch, go to **System Settings → Privacy & Security** and enable **T
 - **Set API Key:** Menu bar → **Set API Key…** (stored securely in your **macOS Keychain**).
 - **Background Auto-Update:** Checks local file changes every 5 minutes and `origin/main` hourly, reloading the engine or rebuilding smoothly in the background (toggleable in the menu bar).
 
+*Press `Right ⌘ + .` in any macOS app to open the floating liquid-glass AI menu:*
 ![macOS Floating Menu](assets/screenshot-macos-menu.jpg)
 
 ---
