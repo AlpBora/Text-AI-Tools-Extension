@@ -199,9 +199,58 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         worker?.stop()
     }
 
+    private func makeHandPenMenuBarImage() -> NSImage {
+        let size = NSSize(width: 18, height: 18)
+        let img = NSImage(size: size, flipped: false) { _ in
+            NSColor.labelColor.setStroke()
+            NSColor.labelColor.setFill()
+
+            // Diagonal pen body + nib pointing bottom-left
+            let pen = NSBezierPath()
+            pen.lineWidth = 1.6
+            pen.lineCapStyle = .round
+            pen.lineJoinStyle = .round
+            pen.move(to: NSPoint(x: 4.0, y: 3.5))
+            pen.line(to: NSPoint(x: 6.2, y: 4.3))
+            pen.line(to: NSPoint(x: 14.8, y: 12.9))
+            pen.line(to: NSPoint(x: 13.0, y: 14.7))
+            pen.line(to: NSPoint(x: 4.4, y: 6.1))
+            pen.close()
+            pen.stroke()
+
+            // Pen tip dot
+            let tip = NSBezierPath(ovalIn: NSRect(x: 2.6, y: 2.3, width: 2.0, height: 2.0))
+            tip.fill()
+
+            // Hand fingers gripping the pen
+            let hand = NSBezierPath()
+            hand.lineWidth = 1.5
+            hand.lineCapStyle = .round
+            hand.lineJoinStyle = .round
+            // Thumb / index grip arc
+            hand.move(to: NSPoint(x: 7.2, y: 8.8))
+            hand.curve(to: NSPoint(x: 11.4, y: 9.2),
+                       controlPoint1: NSPoint(x: 8.4, y: 10.8),
+                       controlPoint2: NSPoint(x: 10.6, y: 10.8))
+            // Palm / wrist curve under the pen
+            hand.curve(to: NSPoint(x: 15.2, y: 4.8),
+                       controlPoint1: NSPoint(x: 13.2, y: 8.0),
+                       controlPoint2: NSPoint(x: 14.8, y: 6.5))
+            hand.move(to: NSPoint(x: 8.6, y: 6.4))
+            hand.curve(to: NSPoint(x: 12.6, y: 3.5),
+                       controlPoint1: NSPoint(x: 9.6, y: 4.6),
+                       controlPoint2: NSPoint(x: 11.2, y: 3.8))
+            hand.stroke()
+            return true
+        }
+        img.isTemplate = true
+        return img
+    }
+
     private func setupMenuBar() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        statusItem.button?.title = "✦"
+        statusItem.button?.image = makeHandPenMenuBarImage()
+        statusItem.button?.imagePosition = .imageLeading
 
         let menu = NSMenu()
         statusMenuItem = NSMenuItem(title: "Text AI Tools — Initializing…", action: nil, keyEquivalent: "")
@@ -229,7 +278,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func toggleAutoCorrect() {
         autoCorrectEnabled.toggle()
         toggleItem.state = autoCorrectEnabled ? .on : .off
-        statusItem.button?.title = autoCorrectEnabled ? "✦" : "✧"
+        statusItem.button?.appearsDisabled = !autoCorrectEnabled
         wordBuffer = ""
         lastUndo = nil
     }
@@ -342,14 +391,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             },
             userInfo: refcon
         ) else {
-            statusItem.button?.title = "⚠✦"
+            statusItem.button?.title = "⚠"
             statusMenuItem?.title = "Status: Needs Accessibility / Input Monitoring"
             NSLog("TextAIToolsMac: CGEvent.tapCreate failed — grant Accessibility/Input Monitoring permission and relaunch.")
             return
         }
 
         self.eventTap = tap
-        statusItem.button?.title = autoCorrectEnabled ? "✦" : "✧"
+        statusItem.button?.title = ""
+        statusItem.button?.appearsDisabled = !autoCorrectEnabled
         statusMenuItem?.title = "Status: Active (System-Wide)"
         let runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
         CFRunLoopAddSource(CFRunLoopGetCurrent(), runLoopSource, .commonModes)

@@ -8,12 +8,27 @@ OUT_DIR="${1:-$HOME/Applications}"
 APP_BUNDLE="$OUT_DIR/$APP_NAME.app"
 CONTENTS="$APP_BUNDLE/Contents"
 MACOS_DIR="$CONTENTS/MacOS"
+RES_DIR="$CONTENTS/Resources"
 
-mkdir -p "$MACOS_DIR"
+mkdir -p "$MACOS_DIR" "$RES_DIR"
 
 if [ -d "/Applications/Xcode.app/Contents/Developer" ]; then
   export DEVELOPER_DIR="/Applications/Xcode.app/Contents/Developer"
 fi
+
+echo "Generating AppIcon.icns..."
+ICONSET_DIR="$(mktemp -d)/AppIcon.iconset"
+mkdir -p "$ICONSET_DIR"
+BASE_PNG="$ICONSET_DIR/base_1024.png"
+swift "$SCRIPT_DIR/make_icon.swift" "$BASE_PNG"
+for sz in 16 32 128 256 512; do
+  sips -z "$sz" "$sz" "$BASE_PNG" --out "$ICONSET_DIR/icon_${sz}x${sz}.png" >/dev/null
+  sz2=$((sz * 2))
+  sips -z "$sz2" "$sz2" "$BASE_PNG" --out "$ICONSET_DIR/icon_${sz}x${sz}@2x.png" >/dev/null
+done
+rm -f "$BASE_PNG"
+iconutil -c icns "$ICONSET_DIR" -o "$RES_DIR/AppIcon.icns"
+rm -rf "$(dirname "$ICONSET_DIR")"
 
 echo "Compiling $APP_NAME..."
 swiftc -O \
@@ -30,6 +45,8 @@ cat > "$CONTENTS/Info.plist" <<EOF
 <dict>
   <key>CFBundleExecutable</key>
   <string>$APP_NAME</string>
+  <key>CFBundleIconFile</key>
+  <string>AppIcon</string>
   <key>CFBundleIdentifier</key>
   <string>com.alpbora.TextAIToolsMac</string>
   <key>CFBundleName</key>
