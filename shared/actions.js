@@ -226,10 +226,10 @@ export function buildSystemPrompt(actionId, { primaryLanguage, secondaryLanguage
     return `Detect the language of the following text. If the text is in ${primary}, translate it naturally and fluently into ${secondary}. Otherwise, translate it naturally and fluently into ${primary}. Output only the translation, with no extra explanation.`;
   }
   if (actionId === "summarize") {
-    return `Summarize the following text in ${primary} as short, clear, and concise bullet points. Output only the summary, without any introductory or closing sentences.`;
+    return `Summarize the following text in ${primary} as a concise, cohesive paragraph of 2 to 4 sentences (no bullet points). Capture the overall meaning clearly. Output only the summary paragraph, with no introductory or closing sentences.`;
   }
   if (actionId === "keypoints") {
-    return `Extract the key points and main takeaways from the following text in ${primary} as a clear, concise bulleted list (focusing on core facts, decisions, and action items). Output only the bullet points, with no introductory or closing sentences.`;
+    return `Extract the key points and main takeaways from the following text in ${primary} as a crisp bulleted list (use "- " bullets, 3 to 6 short items focusing on core facts, decisions, or action items). Output only the bullet points, with no introductory or closing sentences.`;
   }
   return ACTIONS[actionId]?.systemPrompt || "";
 }
