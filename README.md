@@ -11,7 +11,7 @@ Works with **any AI provider / model** (bring your own API key or local model) i
 ## 1. Browser Extension (Chromium & Orion)
 
 1. Clone or download this repository.
-2. Open your browser's extensions page (`chrome://extensions` or **Orion → Settings → Extensions**) and enable **Developer mode**.
+2. Open your browser's extensions page (`chrome://extensions` or **Settings → Extensions**) and enable **Developer mode**.
 3. Click **Load unpacked** and select this repository folder.
 4. Click the extension icon → **Settings**:
    - Paste your **API Key** (auto-detects provider) or pick one manually (**Google Gemini**, **OpenAI**, **Anthropic**, **OpenRouter** with `:free` models, **Groq**, or **Custom / Local** e.g. Ollama).
