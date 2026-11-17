@@ -8,18 +8,6 @@ Works with **any AI provider / model** (bring your own API key or local model) i
 
 ---
 
-## Screenshots
-
-| Browser Selection Menu | macOS Floating Menu (`Right ⌘ + .`) |
-| :---: | :---: |
-| ![Browser Selection Menu](assets/screenshot-browser-selection.jpg) | ![macOS Floating Menu](assets/screenshot-macos-menu.jpg) |
-
-| Extension Popup | Settings (Multi-Provider) |
-| :---: | :---: |
-| ![Extension Popup](assets/screenshot-popup.jpg) | ![Extension Settings](assets/screenshot-settings.jpg) |
-
----
-
 ## 1. Browser Extension (Chromium & Orion)
 
 1. Clone or download this repository.
@@ -33,6 +21,12 @@ Works with **any AI provider / model** (bring your own API key or local model) i
 - **Auto-Correct:** Just type normally in any text box; spellcheck runs locally on your machine at word boundaries (no API calls).
 - **AI Actions:** Select text or place the cursor at the end of a sentence and click **`✦`**, right-click → **Text AI Tools**, or use the extension popup.
 - **Updates:** Automatically reloads when disk files update (e.g. synced by the Mac app) and shows an **Update** banner in the popup when a newer version is available on GitHub.
+
+![Browser Selection Menu](assets/screenshot-browser-selection.jpg)
+
+![Extension Popup](assets/screenshot-popup.jpg)
+
+![Extension Settings](assets/screenshot-settings.jpg)
 
 ---
 
@@ -54,10 +48,12 @@ On first launch, go to **System Settings → Privacy & Security** and enable **T
 
 ### Usage & Customization
 - **System-Wide Auto-Correct:** Works across Mac apps (Notes, WhatsApp, Slack, Mail, etc.) and skips browsers/terminals/password fields by default. Press `Cmd+Z` or `Backspace` to undo.
-- **Global Shortcut (`Right ⌘ + .`):** Select text anywhere on your Mac and press **Right Command + `.`** to open the floating menu (`1`–`5` keys or click).
+- **Global Shortcut (`Right ⌘ + .`):** Select text anywhere on your Mac and press **Right Command + `.`** to open the floating menu (`1`–`6` keys or click).
 - **Change Shortcut:** Click the typewriter icon in the menu bar → **Shortcut: … (Change…)**.
 - **Set API Key:** Menu bar → **Set API Key…** (stored securely in your **macOS Keychain**).
 - **Background Auto-Update:** Checks local file changes every 5 minutes and `origin/main` hourly, reloading the engine or rebuilding smoothly in the background (toggleable in the menu bar).
+
+![macOS Floating Menu](assets/screenshot-macos-menu.jpg)
 
 ---
 
