@@ -1567,6 +1567,7 @@
     const actionsToShow = isEditableTarget
       ? [
           { id: "fix", label: "Fix Grammar", primary: true },
+          { id: "concise", label: "Shorten", primary: false },
           { id: "professional", label: "Professional", primary: false },
           { id: "translate", label: "Translate", primary: false },
           { id: "summarize", label: "Summarize", primary: false }

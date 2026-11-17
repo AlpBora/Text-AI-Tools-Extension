@@ -53,6 +53,16 @@ export const ACTIONS = {
     mode: "modal",
     dialogTitle: "Summary",
     copiedNotice: "Summary copied to clipboard."
+  },
+  concise: {
+    id: "concise",
+    title: "Shorten Text (Keep Meaning)",
+    shortTitle: "Shorten",
+    mode: "replace",
+    dialogTitle: "Shortened Text",
+    copiedNotice: "Shortened text copied to clipboard.",
+    systemPrompt:
+      "Detect the language of the following text. Rewrite it in the same language to be more concise with fewer characters by removing filler words and redundancy, while strictly preserving the original structure, tone, and full meaning without omitting any key information. Output only the shortened text, with no extra explanation."
   }
 };
 
