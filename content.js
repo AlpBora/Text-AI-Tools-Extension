@@ -1588,18 +1588,6 @@
       grid.appendChild(b);
     }
 
-    if (isEditableTarget) {
-      const opt3Btn = document.createElement("button");
-      opt3Btn.type = "button";
-      opt3Btn.className = "action-btn action-btn-secondary";
-      opt3Btn.setAttribute("role", "menuitem");
-      opt3Btn.setAttribute("data-inline-action", "three-options");
-      opt3Btn.textContent = "3 Rewrite Options (AI)";
-      preventBlurOnMouseDown(opt3Btn);
-      opt3Btn.addEventListener("click", runThreeOptions);
-      grid.appendChild(opt3Btn);
-    }
-
     bodyContainer.appendChild(grid);
   }
 

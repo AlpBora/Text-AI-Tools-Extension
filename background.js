@@ -12,6 +12,7 @@ export const CONTENT_SCRIPT_FILES = [
   "content/language-registry.js",
   "content/morphology-tr.js",
   "content/deasciifier-tr.js",
+  "content/personal-model.js",
   "content/spellcheck-engine.js",
   "content/undo-manager.js",
   "content/dom-editor.js",
@@ -357,6 +358,7 @@ export function registerListeners() {
 
     const asyncTypes = new Set([
       "getLexicon",
+      "geminiInlineAction",
       "geminiSentenceSuggestions",
       "geminiContextualWord",
       "relayModalToTopFrame"

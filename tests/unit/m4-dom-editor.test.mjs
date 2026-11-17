@@ -1088,7 +1088,7 @@ describe("M4 content.js Coordinator Integration", () => {
     assert.equal(sr.querySelectorAll(".uncertain-underline").length, 0);
   });
 
-  it("shows floating sentence trigger, fetches suggestions on click, and replaces ONLY target sentence", async () => {
+  it("shows floating sentence trigger, runs single inline action on click, and replaces ONLY target sentence", async () => {
     const env = bootContentEnvironment();
     const ta = env.doc.createElement("textarea");
     env.doc.body.appendChild(ta);
@@ -1108,21 +1108,17 @@ describe("M4 content.js Coordinator Integration", () => {
 
     // Clicking trigger opens action menu WITHOUT making any Gemini call yet
     trigger.click();
-    assert.equal(env.sentMessages.some((m) => m.type === "geminiSentenceSuggestions"), false);
+    assert.equal(env.sentMessages.some((m) => m.type.startsWith("gemini")), false);
 
-    // Click "3 Rewrite Options (AI)" to explicitly request 3 options
-    const opt3Btn = sr.querySelector('[data-inline-action="three-options"]');
-    assert.ok(opt3Btn, "3 Rewrite Options button should be shown");
-    opt3Btn.click();
+    // Click "Fix Grammar" to apply directly to ONLY the target sentence
+    const fixBtn = sr.querySelector('[data-inline-action="fix"]');
+    assert.ok(fixBtn, "Fix Grammar button should be shown");
+    fixBtn.click();
 
-    const calls = env.sentMessages.filter((m) => m.type === "geminiSentenceSuggestions");
+    const calls = env.sentMessages.filter((m) => m.type === "geminiInlineAction");
     assert.equal(calls.length, 1);
+    assert.equal(calls[0].actionId, "fix");
     assert.equal(calls[0].text, "We goes to school.");
-    assert.equal(calls[0].mode, "sentence");
-
-    const options = sr.querySelectorAll(".suggestion-option-btn");
-    assert.equal(options.length, 2);
-    options[0].click();
 
     assert.equal(ta.value, "Intro stays. We go to school.");
   });
