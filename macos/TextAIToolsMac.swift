@@ -8,6 +8,106 @@ let NX_DEVICERCMDKEYMASK: UInt64 = 0x00000010 // Right Command key mask
 final class InlineActionPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
+    override func cancelOperation(_ sender: Any?) {
+        close()
+    }
+}
+
+final class LiquidGlassContainer: NSVisualEffectView {
+    private let gradientLayer = CAGradientLayer()
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        material = .hudWindow
+        blendingMode = .behindWindow
+        state = .active
+        wantsLayer = true
+        layer?.cornerRadius = 16
+        layer?.masksToBounds = true
+        layer?.borderWidth = 1.0
+        layer?.borderColor = NSColor(calibratedRed: 0.35, green: 0.90, blue: 0.96, alpha: 0.38).cgColor
+
+        gradientLayer.colors = [
+            NSColor(calibratedRed: 0.04, green: 0.65, blue: 0.78, alpha: 0.56).cgColor,
+            NSColor(calibratedRed: 0.04, green: 0.16, blue: 0.42, alpha: 0.68).cgColor
+        ]
+        gradientLayer.startPoint = CGPoint(x: 0.0, y: 1.0)
+        gradientLayer.endPoint = CGPoint(x: 1.0, y: 0.0)
+        layer?.insertSublayer(gradientLayer, at: 0)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func layout() {
+        super.layout()
+        gradientLayer.frame = bounds
+    }
+}
+
+final class GlassActionButton: NSButton {
+    private var tracking: NSTrackingArea?
+    private var isHovered = false {
+        didSet { updateAppearance() }
+    }
+    var isPrimaryGlass = false {
+        didSet { updateAppearance() }
+    }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        isBordered = false
+        wantsLayer = true
+        alignment = .left
+        font = NSFont.systemFont(ofSize: 12, weight: .semibold)
+        contentTintColor = .white
+        layer?.cornerRadius = 9
+        updateAppearance()
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    private func updateAppearance() {
+        if isHovered {
+            layer?.backgroundColor = NSColor(calibratedRed: 0.18, green: 0.82, blue: 0.90, alpha: 0.42).cgColor
+            layer?.borderWidth = 0.8
+            layer?.borderColor = NSColor.white.withAlphaComponent(0.45).cgColor
+        } else if isPrimaryGlass {
+            layer?.backgroundColor = NSColor(calibratedRed: 0.10, green: 0.72, blue: 0.84, alpha: 0.34).cgColor
+            layer?.borderWidth = 0.8
+            layer?.borderColor = NSColor(calibratedRed: 0.45, green: 0.94, blue: 0.98, alpha: 0.42).cgColor
+        } else {
+            layer?.backgroundColor = NSColor.white.withAlphaComponent(0.11).cgColor
+            layer?.borderWidth = 0.6
+            layer?.borderColor = NSColor.white.withAlphaComponent(0.18).cgColor
+        }
+        let attr = NSAttributedString(
+            string: "  " + title,
+            attributes: [
+                .foregroundColor: NSColor.white,
+                .font: NSFont.systemFont(ofSize: 12, weight: .medium)
+            ]
+        )
+        attributedTitle = attr
+    }
+
+    override var title: String {
+        didSet { updateAppearance() }
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let t = tracking { removeTrackingArea(t) }
+        tracking = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        if let t = tracking { addTrackingArea(t) }
+    }
+
+    override func mouseEntered(with event: NSEvent) { isHovered = true }
+    override func mouseExited(with event: NSEvent) { isHovered = false }
 }
 
 final class WorkerBridge {
@@ -594,8 +694,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    private func getFocusedSelectionScreenRect() -> NSRect? {
+        let sys = AXUIElementCreateSystemWide()
+        var focusedRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(sys, kAXFocusedUIElementAttribute as CFString, &focusedRef) == .success,
+              let focused = focusedRef else {
+            return nil
+        }
+        let axEl = focused as! AXUIElement
+        var rangeRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(axEl, kAXSelectedTextRangeAttribute as CFString, &rangeRef) == .success,
+              let rangeVal = rangeRef else {
+            return nil
+        }
+        var boundsRef: CFTypeRef?
+        guard AXUIElementCopyParameterizedAttributeValue(
+            axEl,
+            kAXBoundsForRangeParameterizedAttribute as CFString,
+            rangeVal,
+            &boundsRef
+        ) == .success,
+              let boundsVal = boundsRef else {
+            return nil
+        }
+        var axRect = CGRect.zero
+        guard AXValueGetValue(boundsVal as! AXValue, .cgRect, &axRect),
+              axRect.width > 0 || axRect.height > 0 else {
+            return nil
+        }
+        // Convert top-left AX global coordinates to Cocoa bottom-left screen coordinates
+        let primaryHeight = NSScreen.screens.first?.frame.height ?? CGDisplayBounds(CGMainDisplayID()).height
+        let cocoaY = primaryHeight - axRect.origin.y - axRect.size.height
+        return NSRect(x: axRect.origin.x, y: cocoaY, width: axRect.size.width, height: axRect.size.height)
+    }
+
     private func triggerGlobalSelectionMenu() {
         savedFrontApp = NSWorkspace.shared.frontmostApplication
+        let selectionRect = getFocusedSelectionScreenRect()
         let pb = NSPasteboard.general
         let prevString = pb.string(forType: .string)
         let prevChangeCount = pb.changeCount
@@ -616,21 +751,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
             let trimmed = selectedText.trimmingCharacters(in: .whitespacesAndNewlines)
             if trimmed.isEmpty {
-                self.showQuickStatusPanel(message: "Select some text first, then press Right ⌘ + .")
+                self.showQuickStatusPanel(message: "Select text first, then press Right ⌘ + .", anchorRect: selectionRect)
                 return
             }
 
-            self.showActionMenuPanel(selectedText: selectedText, previousClipboard: prevString)
+            self.showActionMenuPanel(selectedText: selectedText, previousClipboard: prevString, anchorRect: selectionRect)
         }
     }
 
-    private func showQuickStatusPanel(message: String) {
+    private func showQuickStatusPanel(message: String, anchorRect: NSRect?) {
         actionPanel?.close()
-        let panel = createPanel(width: 310, height: 64)
+        let width: CGFloat = 270
+        let height: CGFloat = 46
+        let panel = createPanel(width: width, height: height, anchorRect: anchorRect)
         let label = NSTextField(labelWithString: message)
-        label.font = NSFont.systemFont(ofSize: 12, weight: .medium)
+        label.font = NSFont.systemFont(ofSize: 11.5, weight: .medium)
+        label.textColor = .white
         label.alignment = .center
-        label.frame = NSRect(x: 12, y: 20, width: 286, height: 24)
+        label.frame = NSRect(x: 10, y: 12, width: width - 20, height: 20)
         panel.contentView?.addSubview(label)
         panel.makeKeyAndOrderFront(nil)
         actionPanel = panel
@@ -639,54 +777,92 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func createPanel(width: CGFloat, height: CGFloat) -> InlineActionPanel {
-        let mouse = NSEvent.mouseLocation
+    private func createPanel(width: CGFloat, height: CGFloat, anchorRect: NSRect? = nil) -> InlineActionPanel {
         let screenFrame = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
-        var x = mouse.x - width / 2
-        var y = mouse.y - height - 12
+        var x: CGFloat
+        var y: CGFloat
+        if let anchor = anchorRect {
+            // Place neatly below the selected text (with 14px breathing room) so the text stays visible
+            x = anchor.minX
+            y = anchor.minY - height - 14
+            if y < screenFrame.minY + 12 {
+                // If not enough room below, place neatly above the selected text
+                y = anchor.maxY + 14
+            }
+        } else {
+            // Offset away from mouse cursor so it never covers what you're clicking/reading
+            let mouse = NSEvent.mouseLocation
+            x = mouse.x + 22
+            y = mouse.y - height - 24
+            if y < screenFrame.minY + 12 {
+                y = mouse.y + 20
+            }
+        }
         x = max(screenFrame.minX + 12, min(screenFrame.maxX - width - 12, x))
         y = max(screenFrame.minY + 12, min(screenFrame.maxY - height - 12, y))
 
         let panel = InlineActionPanel(
             contentRect: NSRect(x: x, y: y, width: width, height: height),
-            styleMask: [.titled, .closable, .fullSizeContentView],
+            styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
-        panel.title = "✦ Text AI Tools"
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = true
+        panel.isMovableByWindowBackground = true
         panel.isFloatingPanel = true
         panel.level = .floating
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.isReleasedWhenClosed = false
+
+        let glass = LiquidGlassContainer(frame: NSRect(x: 0, y: 0, width: width, height: height))
+        glass.autoresizingMask = [.width, .height]
+        panel.contentView = glass
         return panel
     }
 
-    private func showActionMenuPanel(selectedText: String, previousClipboard: String?) {
-        actionPanel?.close()
-        let width: CGFloat = 320
-        let height: CGFloat = 176
-        let panel = createPanel(width: width, height: height)
-        guard let contentView = panel.contentView else { return }
+    private func addGlassHeader(to container: NSView, width: CGFloat, height: CGFloat, panel: InlineActionPanel) {
+        let titleLbl = NSTextField(labelWithString: "✦ Text AI")
+        titleLbl.font = NSFont.systemFont(ofSize: 11, weight: .bold)
+        titleLbl.textColor = NSColor.white.withAlphaComponent(0.90)
+        titleLbl.frame = NSRect(x: 12, y: height - 26, width: width - 44, height: 16)
+        container.addSubview(titleLbl)
 
-        let actions: [(id: String, title: String, key: String)] = [
-            ("fix", "1. Fix Grammar", "1"),
-            ("concise", "2. Shorten (Keep Meaning)", "2"),
-            ("professional", "3. Professional", "3"),
-            ("translate", "4. Translate (TR ↔ EN)", "4"),
-            ("summarize", "5. Summarize", "5")
+        let closeBtn = NSButton(title: "×", target: nil, action: nil)
+        closeBtn.isBordered = false
+        closeBtn.font = NSFont.systemFont(ofSize: 14, weight: .medium)
+        closeBtn.contentTintColor = NSColor.white.withAlphaComponent(0.75)
+        closeBtn.frame = NSRect(x: width - 28, y: height - 28, width: 20, height: 20)
+        closeBtn.target = ActionTarget.shared
+        closeBtn.action = #selector(ActionTarget.handleClick(_:))
+        ActionTarget.shared.register(button: closeBtn) { [weak panel] in
+            panel?.close()
+        }
+        container.addSubview(closeBtn)
+    }
+
+    private func showActionMenuPanel(selectedText: String, previousClipboard: String?, anchorRect: NSRect?) {
+        actionPanel?.close()
+        let width: CGFloat = 228
+        let height: CGFloat = 196
+        let panel = createPanel(width: width, height: height, anchorRect: anchorRect)
+        guard let contentView = panel.contentView else { return }
+        addGlassHeader(to: contentView, width: width, height: height, panel: panel)
+
+        let actions: [(id: String, title: String, key: String, primary: Bool)] = [
+            ("fix", "1. Fix Grammar", "1", true),
+            ("concise", "2. Shorten", "2", false),
+            ("professional", "3. Professional", "3", false),
+            ("translate", "4. Translate (TR↔EN)", "4", false),
+            ("summarize", "5. Summarize", "5", false)
         ]
 
-        let stack = NSStackView()
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 6
-        stack.frame = NSRect(x: 14, y: 12, width: width - 28, height: height - 42)
-
+        var curY = height - 60
         for act in actions {
-            let btn = NSButton(title: act.title, target: nil, action: nil)
-            btn.bezelStyle = .rounded
-            btn.controlSize = .regular
-            btn.widthAnchor.constraint(equalToConstant: width - 28).isActive = true
+            let btn = GlassActionButton(frame: NSRect(x: 10, y: curY, width: width - 20, height: 27))
+            btn.title = act.title
+            btn.isPrimaryGlass = act.primary
             btn.keyEquivalent = act.key
             btn.target = ActionTarget.shared
             btn.action = #selector(ActionTarget.handleClick(_:))
@@ -700,10 +876,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     panel: panel
                 )
             }
-            stack.addArrangedSubview(btn)
+            contentView.addSubview(btn)
+            curY -= 31
         }
 
-        contentView.addSubview(stack)
         NSApp.activate(ignoringOtherApps: true)
         panel.makeKeyAndOrderFront(nil)
         actionPanel = panel
@@ -717,10 +893,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel: InlineActionPanel
     ) {
         panel.contentView?.subviews.forEach { $0.removeFromSuperview() }
-        let statusLbl = NSTextField(labelWithString: "Running \(label)…")
-        statusLbl.font = NSFont.systemFont(ofSize: 13, weight: .medium)
-        statusLbl.frame = NSRect(x: 16, y: (panel.frame.height - 44) / 2, width: panel.frame.width - 32, height: 22)
-        panel.contentView?.addSubview(statusLbl)
+        if let cv = panel.contentView {
+            addGlassHeader(to: cv, width: panel.frame.width, height: panel.frame.height, panel: panel)
+            let statusLbl = NSTextField(labelWithString: "Running \(label)…")
+            statusLbl.font = NSFont.systemFont(ofSize: 12, weight: .medium)
+            statusLbl.textColor = .white
+            statusLbl.alignment = .center
+            statusLbl.frame = NSRect(x: 12, y: (panel.frame.height - 28) / 2, width: panel.frame.width - 24, height: 20)
+            cv.addSubview(statusLbl)
+        }
 
         worker.sendAsync(["type": "inlineAction", "actionId": actionId, "text": selectedText]) { [weak self] resp in
             DispatchQueue.main.async {
@@ -778,27 +959,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func showPanelResult(text: String, isError: Bool, previousClipboard: String?, panel: InlineActionPanel) {
-        let newWidth: CGFloat = 380
-        let newHeight: CGFloat = 230
+        let newWidth: CGFloat = 330
+        let newHeight: CGFloat = 200
         var frame = panel.frame
         frame.size = NSSize(width: newWidth, height: newHeight)
         panel.setFrame(frame, display: true)
         guard let contentView = panel.contentView else { return }
         contentView.subviews.forEach { $0.removeFromSuperview() }
+        addGlassHeader(to: contentView, width: newWidth, height: newHeight, panel: panel)
 
-        let scroll = NSScrollView(frame: NSRect(x: 12, y: 46, width: newWidth - 24, height: newHeight - 82))
+        let scroll = NSScrollView(frame: NSRect(x: 12, y: 44, width: newWidth - 24, height: newHeight - 78))
         scroll.hasVerticalScroller = true
+        scroll.drawsBackground = false
         let tv = NSTextView(frame: scroll.bounds)
         tv.isEditable = false
-        tv.font = NSFont.systemFont(ofSize: 12.5)
+        tv.drawsBackground = false
+        tv.font = NSFont.systemFont(ofSize: 12)
+        tv.textColor = isError ? NSColor(calibratedRed: 1.0, green: 0.65, blue: 0.65, alpha: 1.0) : .white
         tv.string = text
-        if isError { tv.textColor = .systemRed }
         scroll.documentView = tv
         contentView.addSubview(scroll)
 
-        let copyBtn = NSButton(title: "Copy & Close", target: nil, action: nil)
-        copyBtn.bezelStyle = .rounded
-        copyBtn.frame = NSRect(x: newWidth - 126, y: 10, width: 114, height: 28)
+        let copyBtn = GlassActionButton(frame: NSRect(x: newWidth - 112, y: 10, width: 100, height: 26))
+        copyBtn.title = "Copy"
+        copyBtn.isPrimaryGlass = true
         copyBtn.keyEquivalent = "\r"
         copyBtn.target = ActionTarget.shared
         copyBtn.action = #selector(ActionTarget.handleClick(_:))
@@ -811,9 +995,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         contentView.addSubview(copyBtn)
 
         if !isError {
-            let replaceBtn = NSButton(title: "Replace Selection", target: nil, action: nil)
-            replaceBtn.bezelStyle = .rounded
-            replaceBtn.frame = NSRect(x: 12, y: 10, width: 140, height: 28)
+            let replaceBtn = GlassActionButton(frame: NSRect(x: 12, y: 10, width: 124, height: 26))
+            replaceBtn.title = "Replace"
             replaceBtn.target = ActionTarget.shared
             replaceBtn.action = #selector(ActionTarget.handleClick(_:))
             ActionTarget.shared.register(button: replaceBtn) { [weak self, weak panel] in
