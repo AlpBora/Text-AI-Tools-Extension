@@ -77,14 +77,17 @@ final class GlassActionButton: NSButton {
             layer?.borderColor = NSColor(calibratedRed: 0.45, green: 0.94, blue: 0.98, alpha: 0.42).cgColor
         } else {
             layer?.backgroundColor = NSColor.white.withAlphaComponent(0.11).cgColor
-            layer?.borderWidth = 0.6
+            layer?.borderWidth = 0.8
             layer?.borderColor = NSColor.white.withAlphaComponent(0.18).cgColor
         }
+        let para = NSMutableParagraphStyle()
+        para.alignment = .left
         let attr = NSAttributedString(
             string: "  " + title,
             attributes: [
                 .foregroundColor: NSColor.white,
-                .font: NSFont.systemFont(ofSize: 12, weight: .medium)
+                .font: NSFont.systemFont(ofSize: 12, weight: .medium),
+                .paragraphStyle: para
             ]
         )
         attributedTitle = attr
