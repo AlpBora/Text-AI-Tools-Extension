@@ -163,6 +163,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var toggleItem: NSMenuItem!
     private var skipBrowsersItem: NSMenuItem!
+    private var statusMenuItem: NSMenuItem!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let rootDir = (Bundle.main.object(forInfoDictionaryKey: "TextAIToolsRootDir") as? String)
@@ -183,9 +184,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.button?.title = "✦"
 
         let menu = NSMenu()
-        let titleItem = NSMenuItem(title: "Text AI Tools (System-Wide)", action: nil, keyEquivalent: "")
-        titleItem.isEnabled = false
-        menu.addItem(titleItem)
+        statusMenuItem = NSMenuItem(title: "Text AI Tools — Initializing…", action: nil, keyEquivalent: "")
+        statusMenuItem.isEnabled = false
+        menu.addItem(statusMenuItem)
         menu.addItem(NSMenuItem.separator())
 
         toggleItem = NSMenuItem(title: "Auto-Correct Enabled", action: #selector(toggleAutoCorrect), keyEquivalent: "")
@@ -198,7 +199,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Set Gemini API Key…", action: #selector(promptApiKey), keyEquivalent: ""))
-        menu.addItem(NSMenuItem(title: "Check Accessibility Permission", action: #selector(checkAccessibility), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "Check / Retry Permissions", action: #selector(checkAccessibility), keyEquivalent: ""))
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(quitApp), keyEquivalent: "q"))
 
@@ -244,13 +245,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if !trusted {
             let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
             _ = AXIsProcessTrustedWithOptions(opts)
-        } else {
-            NSApp.activate(ignoringOtherApps: true)
-            let alert = NSAlert()
-            alert.messageText = "Accessibility Permission Active"
-            alert.informativeText = "Text AI Tools is authorized to monitor and auto-correct text system-wide."
-            alert.runModal()
         }
+        if eventTap == nil {
+            startEventTap()
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        if eventTap != nil && AXIsProcessTrusted() {
+            alert.messageText = "System-Wide Auto-Correct Active ✓"
+            alert.informativeText = "Accessibility & Keyboard Tap are active. Note: Chrome/Opera are skipped by default so the browser extension handles them."
+        } else {
+            alert.messageText = "Permission Required"
+            alert.informativeText = "Enable Text AI Tools in System Settings → Privacy & Security → Accessibility AND Input Monitoring, then click 'Check / Retry Permissions' (or relaunch)."
+        }
+        alert.runModal()
     }
 
     @objc private func quitApp() {
@@ -297,11 +305,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             },
             userInfo: refcon
         ) else {
+            statusItem.button?.title = "⚠✦"
+            statusMenuItem?.title = "Status: Needs Accessibility / Input Monitoring"
             NSLog("TextAIToolsMac: CGEvent.tapCreate failed — grant Accessibility/Input Monitoring permission and relaunch.")
             return
         }
 
         self.eventTap = tap
+        statusItem.button?.title = autoCorrectEnabled ? "✦" : "✧"
+        statusMenuItem?.title = "Status: Active (System-Wide)"
         let runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
         CFRunLoopAddSource(CFRunLoopGetCurrent(), runLoopSource, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
@@ -402,7 +414,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     "word": currentWord,
                     "contextTokens": contextTokens,
                     "appName": appName
-                ], timeoutMs: 25)
+                ], timeoutMs: 80)
 
                 wordBuffer = ""
                 if let resp = resp,

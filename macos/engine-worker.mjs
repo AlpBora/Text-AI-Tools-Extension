@@ -108,6 +108,19 @@ loadBundledLexicons();
 let config = loadConfig();
 const userHabits = loadHabits();
 
+// Pre-warm lexicon indexes at startup so the first typed word responds in <2ms
+try {
+  SpellcheckEngine.checkWord({
+    word: "merhaba",
+    primaryLang: config.primaryLanguage,
+    secondaryLang: config.secondaryLanguage,
+    lexiconsByLang,
+    autoCorrectEnabled: false,
+  });
+} catch {
+  // ignore warmup error
+}
+
 function trLower(str) {
   return String(str || "")
     .trim()
