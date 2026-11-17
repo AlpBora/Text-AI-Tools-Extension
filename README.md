@@ -1,6 +1,6 @@
 # Text AI Tools
 
-Offline word-end spellchecking (Turkish & English) + optional, manually triggered AI text tools (**Fix Grammar**, **Shorten**, **Professional**, **Translate**, **Summarize**).
+Offline word-end spellchecking (Turkish & English) + optional, manually triggered AI text tools (**Proofread**, **Shorten**, **Professional**, **Translate**, **Summarize**, **Key Points**).
 
 Works with **any AI provider / model** (bring your own API key or local model) in two ways:
 1. **Browser Extension** (Chromium & Orion)

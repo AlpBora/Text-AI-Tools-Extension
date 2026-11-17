@@ -104,13 +104,13 @@ export const DEFAULT_SETTINGS = {
 export const ACTIONS = {
   fix: {
     id: "fix",
-    title: "Fix & Paste Text",
-    shortTitle: "Fix & Paste",
+    title: "Proofread Text",
+    shortTitle: "Proofread",
     mode: "replace",
-    dialogTitle: "Fixed Text",
-    copiedNotice: "Fixed text copied to clipboard.",
+    dialogTitle: "Proofread Text",
+    copiedNotice: "Proofread text copied to clipboard.",
     systemPrompt:
-      "Detect the language of the following text. Fix spelling, grammar, and punctuation to make it natural, fluent, and clear in that same language. Do not overuse punctuation. Output only the corrected text, with no extra explanation."
+      "Detect the language of the following text. Proofread and fix spelling, grammar, and punctuation to make it natural, fluent, and clear in that same language without changing the meaning or tone. Do not overuse punctuation. Output only the corrected text, with no extra explanation."
   },
   professional: {
     id: "professional",
@@ -137,6 +137,14 @@ export const ACTIONS = {
     mode: "modal",
     dialogTitle: "Summary",
     copiedNotice: "Summary copied to clipboard."
+  },
+  keypoints: {
+    id: "keypoints",
+    title: "Extract Key Points",
+    shortTitle: "Key Points",
+    mode: "modal",
+    dialogTitle: "Key Points",
+    copiedNotice: "Key points copied to clipboard."
   },
   concise: {
     id: "concise",
@@ -219,6 +227,9 @@ export function buildSystemPrompt(actionId, { primaryLanguage, secondaryLanguage
   }
   if (actionId === "summarize") {
     return `Summarize the following text in ${primary} as short, clear, and concise bullet points. Output only the summary, without any introductory or closing sentences.`;
+  }
+  if (actionId === "keypoints") {
+    return `Extract the key points and main takeaways from the following text in ${primary} as a clear, concise bulleted list (focusing on core facts, decisions, and action items). Output only the bullet points, with no introductory or closing sentences.`;
   }
   return ACTIONS[actionId]?.systemPrompt || "";
 }

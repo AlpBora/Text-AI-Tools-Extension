@@ -1076,17 +1076,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func showActionMenuPanel(selectedText: String, previousClipboard: String?, anchorRect: NSRect?) {
         actionPanel?.close()
         let width: CGFloat = 228
-        let height: CGFloat = 196
+        let height: CGFloat = 227
         let panel = createPanel(width: width, height: height, anchorRect: anchorRect)
         guard let contentView = panel.contentView else { return }
         addGlassHeader(to: contentView, width: width, height: height, panel: panel)
 
         let actions: [(id: String, title: String, key: String, primary: Bool)] = [
-            ("fix", "1. Fix Grammar", "1", true),
+            ("fix", "1. Proofread", "1", true),
             ("concise", "2. Shorten", "2", false),
             ("professional", "3. Professional", "3", false),
             ("translate", "4. Translate (TR↔EN)", "4", false),
-            ("summarize", "5. Summarize", "5", false)
+            ("summarize", "5. Summarize", "5", false),
+            ("keypoints", "6. Key Points", "6", false)
         ]
 
         var curY = height - 60
