@@ -468,13 +468,52 @@ describe("M3 shared/actions.js (Gemini 3.5+ & retry logic)", () => {
     ]);
   });
 
-  it("detectProviderFromApiKey identifies Gemini, OpenRouter, Groq, and OpenAI prefixes", async () => {
-    const { detectProviderFromApiKey } = await import("../../shared/actions.js");
+  it("detectProviderFromApiKey identifies Gemini, OpenRouter, Anthropic, Groq, and OpenAI prefixes", async () => {
+    const { detectProviderFromApiKey, AI_PROVIDERS } = await import("../../shared/actions.js");
     assert.equal(detectProviderFromApiKey("AIzaSyTest123"), "gemini");
     assert.equal(detectProviderFromApiKey("sk-or-v1-abc123"), "openrouter");
+    assert.equal(detectProviderFromApiKey("sk-ant-api03-abc"), "anthropic");
     assert.equal(detectProviderFromApiKey("gsk_test123"), "groq");
     assert.equal(detectProviderFromApiKey("sk-proj-abc123"), "openai");
     assert.equal(detectProviderFromApiKey("unknown-key"), null);
+    assert.equal(AI_PROVIDERS.openrouter.defaultModel, "openrouter/free");
+    assert.ok(AI_PROVIDERS.openrouter.models.every((m) => m.includes("free")));
+  });
+
+  it("callAI supports Anthropic (Claude) Messages API", async () => {
+    let capturedUrl = "";
+    let capturedHeaders = null;
+    let capturedBody = null;
+    globalThis.fetch = async (url, init) => {
+      capturedUrl = url;
+      capturedHeaders = init.headers;
+      capturedBody = JSON.parse(init.body);
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return {
+            content: [{ type: "text", text: "Fixed Claude text." }]
+          };
+        }
+      };
+    };
+
+    const { callAI } = await import("../../shared/actions.js");
+    const output = await callAI({
+      provider: "anthropic",
+      apiKey: "sk-ant-test",
+      model: "claude-3-5-haiku-latest",
+      actionId: "fix",
+      text: "broken text",
+      retryBaseDelayMs: 0
+    });
+
+    assert.equal(capturedUrl, "https://api.anthropic.com/v1/messages");
+    assert.equal(capturedHeaders["x-api-key"], "sk-ant-test");
+    assert.equal(capturedBody.model, "claude-3-5-haiku-latest");
+    assert.equal(capturedBody.messages[0].content, "broken text");
+    assert.equal(output, "Fixed Claude text.");
   });
 
   it("callAI supports OpenAI-compatible providers (OpenAI / OpenRouter / Custom)", async () => {

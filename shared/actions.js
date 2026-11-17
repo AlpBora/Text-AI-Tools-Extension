@@ -24,16 +24,29 @@ export const AI_PROVIDERS = {
   openrouter: {
     id: "openrouter",
     label: "OpenRouter",
-    defaultModel: "openai/gpt-4o-mini",
+    defaultModel: "openrouter/free",
     models: [
-      "openai/gpt-4o-mini",
-      "google/gemini-2.5-flash",
-      "anthropic/claude-3.5-sonnet",
-      "meta-llama/llama-3.3-70b-instruct"
+      "openrouter/free",
+      "meta-llama/llama-3.3-70b-instruct:free",
+      "google/gemma-3-27b-it:free",
+      "qwen/qwen3-32b:free"
     ],
     baseUrl: "https://openrouter.ai/api/v1",
     requiresKey: true,
     apiKeyPlaceholder: "sk-or-v1-..."
+  },
+  anthropic: {
+    id: "anthropic",
+    label: "Anthropic (Claude)",
+    defaultModel: "claude-3-5-haiku-latest",
+    models: [
+      "claude-3-5-haiku-latest",
+      "claude-sonnet-4-0",
+      "claude-3-7-sonnet-latest"
+    ],
+    baseUrl: "https://api.anthropic.com/v1",
+    requiresKey: true,
+    apiKeyPlaceholder: "sk-ant-..."
   },
   groq: {
     id: "groq",
@@ -61,6 +74,7 @@ export function detectProviderFromApiKey(apiKey) {
   if (!key) return null;
   if (key.startsWith("AIza")) return "gemini";
   if (key.startsWith("sk-or-")) return "openrouter";
+  if (key.startsWith("sk-ant-")) return "anthropic";
   if (key.startsWith("gsk_")) return "groq";
   if (key.startsWith("sk-")) return "openai";
   return null;
@@ -278,6 +292,7 @@ async function requestAI({
 
   const resolvedModel = (model || providerCfg.defaultModel).trim() || providerCfg.defaultModel;
   const isGemini = providerCfg.id === "gemini";
+  const isAnthropic = providerCfg.id === "anthropic";
 
   let endpoint;
   let headers;
@@ -295,6 +310,20 @@ async function requestAI({
     if (generationConfig && Object.keys(generationConfig).length > 0) {
       payload.generationConfig = generationConfig;
     }
+  } else if (isAnthropic) {
+    endpoint = `${providerCfg.baseUrl}/messages`;
+    headers = {
+      "x-api-key": cleanKey,
+      "anthropic-version": "2023-06-01",
+      "anthropic-dangerous-direct-browser-access": "true",
+      "Content-Type": "application/json"
+    };
+    payload = {
+      model: resolvedModel,
+      max_tokens: 2048,
+      system: systemPrompt,
+      messages: [{ role: "user", content: String(userText) }]
+    };
   } else {
     endpoint = `${providerCfg.baseUrl}/chat/completions`;
     headers = { "Content-Type": "application/json" };
@@ -328,7 +357,7 @@ async function requestAI({
 
       if (!res.ok) {
         const detail = await res.text();
-        if (!isGemini && jsonMode && payload.response_format && res.status === 400) {
+        if (!isGemini && !isAnthropic && jsonMode && payload.response_format && res.status === 400) {
           delete payload.response_format;
           body = JSON.stringify(payload);
           continue;
@@ -354,6 +383,12 @@ async function requestAI({
           throw new GeminiRequestError("Failed to parse AI response.", { retryable: false });
         }
         output = parts.map((p) => p?.text || "").join("");
+      } else if (isAnthropic) {
+        const blocks = data?.content;
+        if (!Array.isArray(blocks)) {
+          throw new GeminiRequestError("Failed to parse AI response.", { retryable: false });
+        }
+        output = blocks.map((b) => (b?.type === "text" ? b.text || "" : "")).join("");
       } else {
         const content = data?.choices?.[0]?.message?.content;
         if (typeof content === "string") {
