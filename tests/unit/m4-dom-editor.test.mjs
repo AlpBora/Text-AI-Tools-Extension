@@ -1021,10 +1021,14 @@ describe("M4 content.js Coordinator Integration", () => {
       "Typing must NEVER trigger Gemini API calls"
     );
 
-    const sr = env.doc.getElementById("text-tools-shadow-host").shadowRoot;
-    const undoBtn = sr.querySelector(".undo-btn");
-    assert.ok(undoBtn, "Geri al (Undo) button must appear");
-    undoBtn.click();
+    const sr = env.doc.getElementById("text-tools-shadow-host")?.shadowRoot;
+    assert.equal(sr ? sr.querySelector(".undo-btn") : null, null, "No intrusive floating undo pill should appear");
+
+    // Verify 1-step Ctrl+Z / Cmd+Z undo
+    const ctrlZEvent = new env.MockEvent("keydown", { bubbles: true, cancelable: true, key: "z" });
+    ctrlZEvent.metaKey = true;
+    ta.dispatchEvent(ctrlZEvent);
+    assert.equal(ctrlZEvent.defaultPrevented, true);
     assert.equal(ta.value, "ozetle ");
 
     // Also verify immediate Backspace undo after another auto-correct

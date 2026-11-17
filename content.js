@@ -1349,7 +1349,8 @@
           clearUncertainState();
         }
 
-        showUndoPill({
+        // Undo is handled silently via Ctrl+Z / Cmd+Z or immediate Backspace (no intrusive floating pill)
+        activeUndoState = {
           editor,
           undoId,
           start: extracted.start,
@@ -1357,7 +1358,7 @@
           originalWord: extracted.word,
           correctedWord: result.replacement,
           boundaryChar: extracted.boundaryChar
-        });
+        };
       }
       return;
     }
@@ -1400,7 +1401,8 @@
     "focusin",
     (e) => {
       if (!DomEditor) return;
-      const editor = DomEditor.resolveEditableTarget(e.target);
+      const rawTarget = (typeof e.composedPath === "function" && e.composedPath()[0]) || e.target;
+      const editor = DomEditor.resolveEditableTarget(rawTarget);
       if (!editor) return;
       activeEditor = editor;
       ensureLexiconsForActiveLanguages();
@@ -1441,7 +1443,8 @@
         return;
       }
 
-      const editor = DomEditor?.resolveEditableTarget(e.target);
+      const rawTarget = (typeof e.composedPath === "function" && e.composedPath()[0]) || e.target;
+      const editor = DomEditor?.resolveEditableTarget(rawTarget);
       if (!editor) return;
 
       const isPlainBackspace =
@@ -1508,7 +1511,8 @@
     "input",
     async (e) => {
       if (isApplyingExtensionEdit || isComposing || e.isComposing || !DomEditor) return;
-      const editor = DomEditor.resolveEditableTarget(e.target);
+      const rawTarget = (typeof e.composedPath === "function" && e.composedPath()[0]) || e.target;
+      const editor = DomEditor.resolveEditableTarget(rawTarget);
       if (!editor) return;
 
       activeEditor = editor;
