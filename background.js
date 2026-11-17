@@ -333,14 +333,100 @@ export async function handleRuntimeMessage(msg, sender) {
     return { ok: true };
   }
 
+  if (msg.type === "checkAndReloadUpdate") {
+    const reloaded = await checkLocalManifestAndReload();
+    if (reloaded) {
+      return { ok: true, reloaded: true };
+    }
+    const remoteVersion = await checkRemoteManifestVersion();
+    const currentVersion = chrome.runtime.getManifest?.().version || "";
+    return {
+      ok: true,
+      reloaded: false,
+      currentVersion,
+      remoteVersion,
+      hasUpdate: Boolean(remoteVersion && compareVersions(remoteVersion, currentVersion) > 0)
+    };
+  }
+
   return { ok: false, error: `Unknown message type: ${msg.type}` };
+}
+
+const REMOTE_MANIFEST_URL =
+  "https://raw.githubusercontent.com/AlpBora/Text-AI-Tools-Extension/main/manifest.json";
+const UPDATE_ALARM_NAME = "text-ai-tools-update-check";
+
+export function compareVersions(a, b) {
+  const pa = String(a || "").split(".").map((n) => parseInt(n, 10) || 0);
+  const pb = String(b || "").split(".").map((n) => parseInt(n, 10) || 0);
+  const len = Math.max(pa.length, pb.length);
+  for (let i = 0; i < len; i++) {
+    const diff = (pa[i] || 0) - (pb[i] || 0);
+    if (diff !== 0) return diff > 0 ? 1 : -1;
+  }
+  return 0;
+}
+
+export async function checkLocalManifestAndReload() {
+  try {
+    if (!chrome?.runtime?.getURL || !chrome?.runtime?.getManifest || !chrome?.runtime?.reload) {
+      return false;
+    }
+    const res = await fetch(chrome.runtime.getURL("manifest.json"), { cache: "no-store" });
+    if (!res.ok) return false;
+    const diskManifest = await res.json();
+    const runningVersion = chrome.runtime.getManifest().version;
+    if (diskManifest?.version && diskManifest.version !== runningVersion) {
+      chrome.runtime.reload();
+      return true;
+    }
+  } catch {
+    // Ignore local fetch errors
+  }
+  return false;
+}
+
+export async function checkRemoteManifestVersion() {
+  try {
+    const res = await fetch(REMOTE_MANIFEST_URL, { cache: "no-store" });
+    if (!res.ok) return null;
+    const remote = await res.json();
+    const remoteVersion = typeof remote?.version === "string" ? remote.version.trim() : null;
+    if (remoteVersion && chrome?.storage?.local?.set) {
+      await chrome.storage.local.set({ latestRemoteVersion: remoteVersion });
+    }
+    return remoteVersion;
+  } catch {
+    return null;
+  }
+}
+
+async function runPeriodicUpdateCheck() {
+  const reloaded = await checkLocalManifestAndReload();
+  if (!reloaded) {
+    await checkRemoteManifestVersion();
+  }
 }
 
 export function registerListeners() {
   if (typeof chrome === "undefined" || !chrome.runtime) return;
 
-  chrome.runtime.onInstalled?.addListener(setupContextMenus);
-  chrome.runtime.onStartup?.addListener(setupContextMenus);
+  chrome.runtime.onInstalled?.addListener(() => {
+    setupContextMenus();
+    chrome.alarms?.create?.(UPDATE_ALARM_NAME, { periodInMinutes: 30 });
+    runPeriodicUpdateCheck();
+  });
+  chrome.runtime.onStartup?.addListener(() => {
+    setupContextMenus();
+    chrome.alarms?.create?.(UPDATE_ALARM_NAME, { periodInMinutes: 30 });
+    runPeriodicUpdateCheck();
+  });
+
+  chrome.alarms?.onAlarm?.addListener((alarm) => {
+    if (alarm?.name === UPDATE_ALARM_NAME) {
+      runPeriodicUpdateCheck();
+    }
+  });
 
   chrome.storage?.onChanged?.addListener((changes, area) => {
     if (area === "local" && (changes.primaryLanguage || changes.secondaryLanguage)) {
@@ -374,7 +460,8 @@ export function registerListeners() {
       "geminiInlineAction",
       "geminiSentenceSuggestions",
       "geminiContextualWord",
-      "relayModalToTopFrame"
+      "relayModalToTopFrame",
+      "checkAndReloadUpdate"
     ]);
     if (!msg || !asyncTypes.has(msg.type)) {
       return false;

@@ -35,6 +35,9 @@ function initPopup() {
   const shortcutsCard = document.getElementById("shortcuts-card");
   const shortcutsListEl = document.getElementById("shortcuts-list");
   const closeShortcutsBtn = document.getElementById("close-shortcuts");
+  const updateBanner = document.getElementById("update-banner");
+  const updateLabel = document.getElementById("update-label");
+  const updateNowBtn = document.getElementById("update-now-btn");
 
   if (!apiBanner || !inputText || !statusEl) return;
 
@@ -180,6 +183,56 @@ function initPopup() {
     await renderInlineShortcuts();
   });
 
+  function isNewerVersion(remote, local) {
+    const pa = String(remote || "").split(".").map((n) => parseInt(n, 10) || 0);
+    const pb = String(local || "").split(".").map((n) => parseInt(n, 10) || 0);
+    for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+      const diff = (pa[i] || 0) - (pb[i] || 0);
+      if (diff !== 0) return diff > 0;
+    }
+    return false;
+  }
+
+  async function refreshUpdateBanner() {
+    if (!updateBanner || !chrome?.storage?.local || !chrome?.runtime?.getManifest) return;
+    try {
+      const { latestRemoteVersion } = await chrome.storage.local.get({ latestRemoteVersion: "" });
+      const localVersion = chrome.runtime.getManifest().version;
+      if (latestRemoteVersion && isNewerVersion(latestRemoteVersion, localVersion)) {
+        if (updateLabel) {
+          updateLabel.textContent = `Update available: v${latestRemoteVersion}`;
+        }
+        updateBanner.classList.remove("hidden");
+      } else {
+        updateBanner.classList.add("hidden");
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  updateNowBtn?.addEventListener("click", async () => {
+    updateNowBtn.disabled = true;
+    updateNowBtn.textContent = "Updating...";
+    try {
+      const res = await chrome.runtime.sendMessage({ type: "checkAndReloadUpdate" });
+      if (res?.reloaded) {
+        return;
+      }
+      setStatus("Disk files not synced yet — opening GitHub.", "ok");
+      await chrome.tabs.create({
+        url: "https://github.com/AlpBora/Text-AI-Tools-Extension",
+        active: true
+      });
+    } catch {
+      setStatus("Could not check update.", "err");
+    } finally {
+      updateNowBtn.disabled = false;
+      updateNowBtn.textContent = "Update";
+    }
+  });
+
+  refreshUpdateBanner();
   refreshApiBanner();
 }
 
