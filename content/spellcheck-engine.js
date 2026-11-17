@@ -788,8 +788,10 @@
           const mLower = trLower(m.word);
           if (hasApo && !mLower.includes("'")) continue;
           const freq = idx.exactMap.get(mLower) || 0;
+          const isColloquial = m.reason === "colloquial_repair";
           const isFoldedOnly = m.reason === "folded_morph" || m.reason === "folded_root";
           const isStrictRepair =
+            isColloquial ||
             m.reason === "vowel_drop_repair" ||
             m.reason === "voicing_repair" ||
             (m.reason === "morph_repair" && !m.hasVowelRepair);
@@ -802,26 +804,29 @@
                 m.stem.length >= 4 &&
                 /[çğıöşü]/.test(m.stem)));
           const isStrongRepair = isStrictRepair || isAttestedHarmonyRepair;
-          const base = isFoldedOnly
-            ? 0.82
-            : isStrongRepair
-              ? 0.79
-              : m.reason === "morph_repair"
-                ? 0.62
-                : 0.60;
+          const base = isColloquial
+            ? 0.96
+            : isFoldedOnly
+              ? 0.82
+              : isStrongRepair
+                ? 0.79
+                : m.reason === "morph_repair"
+                  ? 0.62
+                  : 0.60;
+          const effFreq = isColloquial && freq === 0 ? 750 : freq;
           const normScore = Number(
-            Math.min(0.96, base + (m.score ? Math.min(0.11, m.score * 0.08) : 0) + (freq / idx.maxFreq) * 0.07 - i * 0.03).toFixed(4)
+            Math.min(0.985, base + (m.score ? Math.min(0.11, m.score * 0.08) : 0) + (effFreq / idx.maxFreq) * 0.07 - i * 0.03).toFixed(4)
           );
           candidates.push({
             word: applyCasing(mLower, cleanWord, "tr"),
             lowerWord: mLower,
             score: normScore,
-            source: "morph",
+            source: isColloquial ? "colloquial" : "morph",
             lang: "tr",
-            freq,
-            weightedDist: isFoldedOnly ? 0.15 : 0.55,
+            freq: effFreq,
+            weightedDist: isFoldedOnly || isColloquial ? 0.15 : 0.55,
             rawDist: 1,
-            morphAllowAutoCorrect: isFoldedOnly || isStrongRepair,
+            morphAllowAutoCorrect: isColloquial || isFoldedOnly || isStrongRepair,
           });
         }
       }
@@ -979,6 +984,24 @@
     }
 
     const cleanWord = normalizeApostrophes(rawWord.trim());
+    const userHabits = opts.userHabits && typeof opts.userHabits === "object" ? opts.userHabits : null;
+    const trLowerWord = trLower(cleanWord);
+    const trFoldWord = trFold(trLowerWord);
+
+    // 0. If user explicitly undid/dismissed this word >= 2 times, respect personal habit and treat as valid
+    if (
+      userHabits &&
+      userHabits.ignored &&
+      ((userHabits.ignored[trLowerWord] || 0) >= 2 || (userHabits.ignored[cleanWord.toLowerCase()] || 0) >= 2)
+    ) {
+      return {
+        valid: true,
+        decision: "valid",
+        detectedLang: primaryId,
+        candidates: [],
+      };
+    }
+
     const contextSlice = Array.isArray(opts.contextTokens) ? opts.contextTokens.slice(-12) : opts.contextTokens || [];
 
     const guess = registry
@@ -1022,13 +1045,18 @@
       }
     }
 
+    const COLLOQUIAL_TR_KEYS = new Set([
+      "bikac", "bisi", "bisey", "birsey", "bisiler", "biseyler", "birseyler",
+      "hersey", "hicbi", "hicbisi", "hicbirsey", "bitakim", "heralde", "galba",
+      "yalnis", "yanliz", "noldu", "nolur", "noluyo", "noluyor", "napiyon", "napiyosun", "napiyom"
+    ]);
+    const isColloquialTrKey = activeWithLexicon.includes("tr") && COLLOQUIAL_TR_KEYS.has(trFoldWord);
+
     // 1. Check if word is valid in ANY active configured language (bilingual code-switching)
     for (const langId of activeWithLexicon) {
       const profile = getProfile(langId);
       if (isValidInSingleLexicon(cleanWord, langId, normLexicons[langId], profile, morph)) {
-        // Do not short-circuit as valid if Turkish deasciifier found a dominant unambiguous restoration:
-        // - In Turkish itself (e.g. degil -> değil, simdi -> şimdi, baska -> başka, kisi -> kişi)
-        if (langId === "tr" && preDeascTr) {
+        if (langId === "tr" && (preDeascTr || isColloquialTrKey)) {
           continue;
         }
         // - Or in a secondary language when Turkish is the active context/primary language and the Turkish
@@ -1130,14 +1158,50 @@
         } else if (langId === primaryId) {
           langBias = 0.025;
         }
+        let habitBonus = 0;
+        if (userHabits && userHabits.wordCounts) {
+          const uCount = Number(userHabits.wordCounts[c.lowerWord]) || 0;
+          if (uCount > 0) {
+            habitBonus = Math.min(0.10, Math.log2(uCount + 1) * 0.035);
+          }
+        }
+        const baseClamped = Math.max(0.01, Math.min(0.995, c.score + langBias));
         allCandidates.push({
           ...c,
-          score: Number(Math.max(0.01, Math.min(0.995, c.score + langBias)).toFixed(4)),
+          score: Number((baseClamped + habitBonus).toFixed(4)),
         });
       }
     }
 
-    const SOURCE_PRIORITY = { deasciify: 5, morph: 4, exact_fold: 3, edit: 2, phonetic: 1 };
+    // Inject personal learned typo -> target mappings from userHabits.corrections
+    if (userHabits && userHabits.corrections) {
+      const corrBucket =
+        userHabits.corrections[trLowerWord] ||
+        userHabits.corrections[cleanWord.toLowerCase()] ||
+        userHabits.corrections[trFoldWord] ||
+        null;
+      if (corrBucket && typeof corrBucket === "object") {
+        const entries = Object.entries(corrBucket)
+          .filter(([target, cnt]) => target && target !== trLowerWord && Number(cnt) >= 1)
+          .sort((a, b) => Number(b[1]) - Number(a[1]));
+        for (let i = 0; i < Math.min(entries.length, 2); i++) {
+          const [targetLower, cnt] = entries[i];
+          const targetLang = guess.primary || primaryId;
+          allCandidates.push({
+            word: applyCasing(targetLower, cleanWord, targetLang),
+            lowerWord: targetLower,
+            score: Number((1.05 + Math.min(0.05, Number(cnt) * 0.01) - i * 0.03).toFixed(4)),
+            source: "user_habit",
+            lang: targetLang,
+            freq: 900,
+            weightedDist: 0.1,
+            rawDist: 1,
+          });
+        }
+      }
+    }
+
+    const SOURCE_PRIORITY = { user_habit: 7, colloquial: 6, deasciify: 5, morph: 4, exact_fold: 3, edit: 2, phonetic: 1 };
     const dedupMap = new Map();
     for (const c of allCandidates) {
       const key = `${c.lang}:${c.lowerWord}`;
@@ -1153,7 +1217,8 @@
           const minW = Math.min(c.weightedDist, prev.weightedDist);
           const minR = Math.min(c.rawDist, prev.rawDist);
           const keepPrevSource =
-            prev.source === "deasciify" ||
+            prev.source === "user_habit" ||
+            (prev.source === "deasciify" && c.source !== "user_habit" && c.source !== "colloquial") ||
             (c.source === "phonetic" && prev.source !== "phonetic" && prev.score >= c.score - 0.05) ||
             (prev.source === "morph" && c.source === "edit" && prev.score >= c.score - 0.04);
           dedupMap.set(key, {
@@ -1229,16 +1294,22 @@
         }
       }
       if (!contextConflict) {
-        if (top.source === "deasciify") {
-          allowAutoCorrect = trDeasciifyStatus === "unambiguous" && margin >= 0.02;
+        const topUserCount = Number(userHabits?.wordCounts?.[top.lowerWord]) || 0;
+        const secondUserCount = second ? Number(userHabits?.wordCounts?.[second.lowerWord]) || 0 : 0;
+        const userHabitTieBreaker = topUserCount >= 1 && topUserCount > secondUserCount && margin >= 0.02;
+
+        if (top.source === "user_habit" || top.source === "colloquial") {
+          allowAutoCorrect = margin >= 0.005;
+        } else if (top.source === "deasciify") {
+          allowAutoCorrect = (trDeasciifyStatus === "unambiguous" && margin >= 0.02) || userHabitTieBreaker;
         } else if (top.source === "morph") {
           const weakOrZeroCompetitor = !sameLangCompetitor || (sameLangCompetitor.freq || 0) === 0;
           allowAutoCorrect =
             top.morphAllowAutoCorrect !== false &&
             top.score >= 0.78 &&
-            (margin >= 0.04 || (weakOrZeroCompetitor && margin >= 0.02));
+            (margin >= 0.04 || (weakOrZeroCompetitor && margin >= 0.02) || userHabitTieBreaker);
         } else if (top.source === "exact_fold") {
-          allowAutoCorrect = top.score >= 0.80 && margin >= 0.05;
+          allowAutoCorrect = top.score >= 0.80 && (margin >= 0.05 || userHabitTieBreaker);
         } else if (top.source === "edit") {
           const isHighFreqTransposition =
             top.weightedDist <= 0.50 &&
@@ -1253,15 +1324,29 @@
             (!sameLangCompetitor ||
               (sameLangCompetitor.freq || 0) === 0 ||
               (top.freq || 0) - (sameLangCompetitor.freq || 0) >= 120);
-          const minSameLangMargin = isFreqDominant ? 0.025 : isHighFreqTransposition ? 0.035 : 0.08;
-          const minMargin = isFreqDominant ? 0.025 : isHighFreqTransposition ? 0.035 : 0.05;
+          const minSameLangMargin = userHabitTieBreaker
+            ? 0.02
+            : isFreqDominant
+              ? 0.025
+              : isHighFreqTransposition
+                ? 0.035
+                : 0.08;
+          const minMargin = userHabitTieBreaker
+            ? 0.02
+            : isFreqDominant
+              ? 0.025
+              : isHighFreqTransposition
+                ? 0.035
+                : 0.05;
           allowAutoCorrect =
             top.weightedDist <= 1.15 &&
             top.rawDist <= 2 &&
             top.score >= 0.70 &&
-            (top.freq || 0) >= 250 &&
+            ((top.freq || 0) >= 250 || topUserCount >= 1) &&
             sameLangMargin >= minSameLangMargin &&
             margin >= minMargin;
+        } else if (top.source === "phonetic" && userHabitTieBreaker && top.score >= 0.65) {
+          allowAutoCorrect = true;
         }
       }
     }

@@ -1309,6 +1309,78 @@
       }
     }
 
+    // 1c. Colloquial Turkish Shorthands & Spoken Verb Suffixes (e.g., "bikac" -> "birkaç", "uyuyom" -> "uyuyorum", "yatiyom" -> "yatıyorum", "bekliyo" -> "bekliyor")
+    if (!options.foldedOnly) {
+      const COLLOQUIAL_EXACT = {
+        bikac: "birkaç",
+        bisi: "bir şey",
+        bisey: "bir şey",
+        birsey: "bir şey",
+        bisiler: "bir şeyler",
+        biseyler: "bir şeyler",
+        birseyler: "bir şeyler",
+        hersey: "her şey",
+        hicbi: "hiçbir",
+        hicbisi: "hiçbir şey",
+        hicbirsey: "hiçbir şey",
+        bitakim: "birtakım",
+        birtakim: "birtakım",
+        heralde: "herhalde",
+        galba: "galiba",
+        yalnis: "yanlış",
+        yanliz: "yalnız",
+        noldu: "ne oldu",
+        nolur: "ne olur",
+        noluyo: "ne oluyor",
+        noluyor: "ne oluyor",
+        napiyon: "ne yapıyorsun",
+        napiyosun: "ne yapıyorsun",
+        napiyom: "ne yapıyorum",
+      };
+      const exactColloq = COLLOQUIAL_EXACT[folded];
+      if (exactColloq && exactColloq !== lower) {
+        recordCandidate(exactColloq, exactColloq.split(" ")[0], 1.15, "colloquial_repair");
+      }
+
+      if (folded.length >= 4) {
+        const COLLOQUIAL_VERB_TAILS = [
+          [/([iu])yom$/, "$1yorum"],
+          [/([iu])yo$/, "$1yor"],
+          [/([iu])yon$/, "$1yorsun"],
+          [/([iu])yosun$/, "$1yorsun"],
+          [/([iu])yoz$/, "$1yoruz"],
+          [/([iu])yolar$/, "$1yorlar"],
+          [/([iu])yodu$/, "$1yordu"],
+          [/([iu])yomus$/, "$1yormus"],
+        ];
+        for (const [tailRe, replacementTail] of COLLOQUIAL_VERB_TAILS) {
+          if (!tailRe.test(folded)) continue;
+          const expandedFolded = folded.replace(tailRe, replacementTail);
+          const candidatePool = [];
+          if (isValidWord(expandedFolded, trLexicon)) {
+            candidatePool.push({ word: expandedFolded, reason: "folded_morph" });
+          }
+          const expandedCands = generateInflectedCandidates(expandedFolded, trLexicon, 4, { foldedOnly: true });
+          for (const ec of expandedCands) {
+            candidatePool.push(ec);
+          }
+          for (const ec of candidatePool) {
+            if (ec.reason !== "folded_morph" && ec.reason !== "folded_root") continue;
+            // Ensure the underlying stem is a verb or denominal verb derivation ending in -yor...
+            const analyses = runExactFSM(ec.word, idx);
+            const hasVerbPath = analyses.some(
+              (a) => a.pos === "V" || a.suffixes.some((s) => s.includes("yor"))
+            );
+            if (!hasVerbPath) continue;
+            const freq = idx.words && idx.words[ec.word] ? idx.words[ec.word] : 0;
+            const freqBonus = freq ? freq / 800 : 0;
+            recordCandidate(ec.word, analyses[0].stem || ec.stem, 1.08 + freqBonus, "colloquial_repair");
+          }
+          break;
+        }
+      }
+    }
+
     // 2. Stem-typo + Suffix-tail Re-inflection (e.g., "ktaplar" -> "kitaplar", "teşekürler" -> "teşekkürler", "kitpda" -> "kitapta")
     if (!options.foldedOnly && bestByWord.size < maxResults && lower.length >= 4) {
       const commonTailRegex =

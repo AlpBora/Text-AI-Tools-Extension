@@ -37,10 +37,82 @@
   let toastTimer = null;
   let undoTimer = null;
   let selectionUpdateTimer = null;
+  let habitSaveTimer = null;
 
   let activeUncertain = null; // { editor, word, span, candidates, sentence }
   let activeUndoState = null; // { editor, undoId, start, end, originalWord, correctedWord, boundaryChar }
   let activeMenuMode = null; // "uncertain" | "suggestions" | null
+
+  const userHabits = {
+    corrections: Object.create(null),
+    wordCounts: Object.create(null),
+    ignored: Object.create(null)
+  };
+
+  function trLowerHabit(str) {
+    return String(str || "")
+      .trim()
+      .normalize("NFC")
+      .replace(/İ/g, "i")
+      .replace(/I/g, "ı")
+      .toLowerCase()
+      .replace(/i\u0307/g, "i")
+      .normalize("NFC");
+  }
+
+  function saveUserHabitsDebounced() {
+    if (habitSaveTimer) clearTimeout(habitSaveTimer);
+    habitSaveTimer = setTimeout(() => {
+      habitSaveTimer = null;
+      try {
+        if (!chrome?.storage?.local) return;
+        chrome.storage.local.set({
+          userHabits: {
+            corrections: { ...userHabits.corrections },
+            wordCounts: { ...userHabits.wordCounts },
+            ignored: { ...userHabits.ignored }
+          }
+        });
+      } catch {
+        // Ignore storage write errors
+      }
+    }, 400);
+  }
+
+  function recordHabitWordUsage(word) {
+    const k = trLowerHabit(word);
+    if (!k || k.length < 2) return;
+    userHabits.wordCounts[k] = (Number(userHabits.wordCounts[k]) || 0) + 1;
+    saveUserHabitsDebounced();
+  }
+
+  function recordHabitCorrection(origWord, targetWord, weight = 1) {
+    const o = trLowerHabit(origWord);
+    const t = trLowerHabit(targetWord);
+    if (!o || !t || o === t) return;
+    if (!userHabits.corrections[o] || typeof userHabits.corrections[o] !== "object") {
+      userHabits.corrections[o] = Object.create(null);
+    }
+    userHabits.corrections[o][t] = (Number(userHabits.corrections[o][t]) || 0) + weight;
+    userHabits.wordCounts[t] = (Number(userHabits.wordCounts[t]) || 0) + weight;
+    if (userHabits.ignored[o]) {
+      delete userHabits.ignored[o];
+    }
+    saveUserHabitsDebounced();
+  }
+
+  function recordHabitIgnore(origWord, correctedWord) {
+    const o = trLowerHabit(origWord);
+    if (!o) return;
+    userHabits.ignored[o] = (Number(userHabits.ignored[o]) || 0) + 1;
+    if (correctedWord) {
+      const t = trLowerHabit(correctedWord);
+      if (userHabits.corrections[o] && userHabits.corrections[o][t]) {
+        userHabits.corrections[o][t] = Math.max(0, Number(userHabits.corrections[o][t]) - 1);
+      }
+    }
+    saveUserHabitsDebounced();
+  }
 
   // --- Storage & Lazy Lexicon Loading ---
   function loadSettings() {
@@ -52,7 +124,8 @@
           autoCorrectEnabled: true,
           primaryLanguage: "Turkish",
           secondaryLanguage: "English",
-          copyOnReplace: true
+          copyOnReplace: true,
+          userHabits: null
         },
         (data) => {
           if (chrome.runtime?.lastError || !data) return;
@@ -61,6 +134,17 @@
           settings.primaryLanguage = String(data.primaryLanguage || "Turkish").trim() || "Turkish";
           settings.secondaryLanguage = String(data.secondaryLanguage || "English").trim() || "English";
           settings.copyOnReplace = Boolean(data.copyOnReplace);
+          if (data.userHabits && typeof data.userHabits === "object") {
+            if (data.userHabits.corrections && typeof data.userHabits.corrections === "object") {
+              Object.assign(userHabits.corrections, data.userHabits.corrections);
+            }
+            if (data.userHabits.wordCounts && typeof data.userHabits.wordCounts === "object") {
+              Object.assign(userHabits.wordCounts, data.userHabits.wordCounts);
+            }
+            if (data.userHabits.ignored && typeof data.userHabits.ignored === "object") {
+              Object.assign(userHabits.ignored, data.userHabits.ignored);
+            }
+          }
         }
       );
     } catch {
@@ -811,6 +895,10 @@
       consumed.originalWord
     );
 
+    if (ok) {
+      recordHabitIgnore(consumed.originalWord, consumed.correctedWord);
+    }
+
     hideUndoPill();
     return ok;
   }
@@ -981,6 +1069,9 @@
     closeBtn.textContent = "×";
     preventBlurOnMouseDown(closeBtn);
     closeBtn.addEventListener("click", () => {
+      if (uncertainState?.word) {
+        recordHabitIgnore(uncertainState.word, null);
+      }
       clearUncertainState();
     });
 
@@ -991,6 +1082,7 @@
     const applyCandidate = (newWord) => {
       const ok = applyExtensionReplacement(uncertainState.editor, uncertainState.span, newWord);
       if (ok) {
+        recordHabitCorrection(uncertainState.word, newWord, 2);
         clearUncertainState();
         scheduleFloatingTriggerUpdate();
       }
@@ -1322,16 +1414,23 @@
       secondaryLang: settings.secondaryLanguage,
       lexiconsByLang,
       autoCorrectEnabled: settings.autoCorrectEnabled,
+      userHabits,
       context: { inputType }
     });
 
-    if (!result || result.decision === "skip" || result.decision === "valid") {
+    if (!result || result.decision === "skip") {
+      return;
+    }
+
+    if (result.decision === "valid") {
+      recordHabitWordUsage(extracted.word);
       return;
     }
 
     if (result.decision === "auto_correct" && result.replacement && result.replacement !== extracted.word) {
       const ok = applyExtensionReplacement(editor, extracted.rangeSnapshot, result.replacement);
       if (ok && UndoManager) {
+        recordHabitWordUsage(result.replacement);
         const newEnd = extracted.start + result.replacement.length;
         const undoId = UndoManager.recordAutoCorrect({
           targetRef: editor,

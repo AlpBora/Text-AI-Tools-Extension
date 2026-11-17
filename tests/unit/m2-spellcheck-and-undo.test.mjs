@@ -360,6 +360,66 @@ describe("M2: Turkish Morphology, Deasciifier, Homographs & Ambiguity Integratio
       assert.equal(res.replacement, expected);
     }
   });
+
+  it("normalizes colloquial Turkish shorthands (bikac, uyuyom, yatiyom, bekliyo, bisi) and adapts to userHabits", () => {
+    const colloquialCases = [
+      ["bikac", "birkaç"],
+      ["uyuyom", "uyuyorum"],
+      ["yatiyom", "yatıyorum"],
+      ["geliyom", "geliyorum"],
+      ["bekliyo", "bekliyor"],
+      ["cikiyo", "çıkıyor"],
+      ["kullanamiyom", "kullanamıyorum"],
+      ["bisi", "bir şey"],
+      ["heralde", "herhalde"],
+      ["galba", "galiba"],
+    ];
+    for (const [input, expected] of colloquialCases) {
+      const res = SpellcheckEngine.checkWord({
+        word: input,
+        primaryLang: "tr",
+        secondaryLang: "en",
+        lexiconsByLang: LEXICONS,
+        autoCorrectEnabled: true,
+      });
+      assert.equal(res.decision, "auto_correct", `Expected auto_correct for colloquial "${input}", got ${res.decision}`);
+      assert.equal(res.replacement, expected);
+    }
+
+    // Ambiguous 'soyle' becomes auto_correct when userHabits has personal usage of 'şöyle' or learned correction
+    const habitWordCountRes = SpellcheckEngine.checkWord({
+      word: "soyle",
+      primaryLang: "tr",
+      secondaryLang: "en",
+      lexiconsByLang: LEXICONS,
+      autoCorrectEnabled: true,
+      userHabits: { wordCounts: { şöyle: 5 } },
+    });
+    assert.equal(habitWordCountRes.decision, "auto_correct");
+    assert.equal(habitWordCountRes.replacement, "şöyle");
+
+    const habitCorrectionRes = SpellcheckEngine.checkWord({
+      word: "uc",
+      primaryLang: "tr",
+      secondaryLang: "en",
+      lexiconsByLang: LEXICONS,
+      autoCorrectEnabled: true,
+      userHabits: { corrections: { uc: { üç: 1 } } },
+    });
+    assert.equal(habitCorrectionRes.decision, "auto_correct");
+    assert.equal(habitCorrectionRes.replacement, "üç");
+
+    // Ignored word (undone >= 2 times) is left untouched as valid
+    const ignoredRes = SpellcheckEngine.checkWord({
+      word: "uyuyom",
+      primaryLang: "tr",
+      secondaryLang: "en",
+      lexiconsByLang: LEXICONS,
+      autoCorrectEnabled: true,
+      userHabits: { ignored: { uyuyom: 2 } },
+    });
+    assert.equal(ignoredRes.decision, "valid");
+  });
 });
 
 describe("M2: Bilingual Code-Switching & Custom Unbundled Languages", () => {
