@@ -35,6 +35,7 @@ function initPopup() {
   const shortcutsCard = document.getElementById("shortcuts-card");
   const shortcutsListEl = document.getElementById("shortcuts-list");
   const closeShortcutsBtn = document.getElementById("close-shortcuts");
+  const openBrowserShortcutsBtn = document.getElementById("open-browser-shortcuts");
   const updateBanner = document.getElementById("update-banner");
   const updateLabel = document.getElementById("update-label");
   const updateNowBtn = document.getElementById("update-now-btn");
@@ -166,11 +167,11 @@ function initPopup() {
   }
 
   openShortcutsBtn?.addEventListener("click", async () => {
-    const url = getShortcutsUrl();
-    if (!url) {
-      await renderInlineShortcuts();
-      return;
-    }
+    await renderInlineShortcuts();
+  });
+
+  openBrowserShortcutsBtn?.addEventListener("click", async () => {
+    const url = getShortcutsUrl() || "chrome://extensions/shortcuts";
     try {
       const tab = await chrome.tabs.create({ url, active: true });
       if (tab?.id && !chrome.runtime?.lastError) {
@@ -178,9 +179,14 @@ function initPopup() {
         return;
       }
     } catch {
-      // Fallback to inline panel if browser blocks chrome:// URLs
+      // Fallback below
     }
-    await renderInlineShortcuts();
+    try {
+      await navigator.clipboard.writeText(url);
+      setStatus(`Copied ${url} — paste it in Chromium address bar.`, "ok");
+    } catch {
+      setStatus(`Open ${url} in a Chromium browser.`, "err");
+    }
   });
 
   function isNewerVersion(remote, local) {

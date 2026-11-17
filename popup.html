@@ -24,6 +24,20 @@
       </div>
     </div>
 
+    <div id="shortcuts-card" class="card hidden">
+      <div class="row-between" style="margin-bottom: 6px;">
+        <label style="margin-bottom: 0;">Extension Shortcuts</label>
+        <button id="close-shortcuts" class="link-btn" type="button">Close</button>
+      </div>
+      <div id="shortcuts-list" class="hint" style="margin-bottom: 8px;"></div>
+      <div class="row" style="margin-bottom: 6px;">
+        <button id="open-browser-shortcuts" class="btn" type="button" style="font-size: 12px; padding: 6px 10px;">Open Browser Shortcuts Page</button>
+      </div>
+      <div class="hint">
+        Orion / Safari users: manage shortcuts in <b>Orion → Settings → Extensions</b> or <b>macOS System Settings → Keyboard Shortcuts</b>.
+      </div>
+    </div>
+
     <div id="api-banner" class="card hidden">
       <label for="quick-key">API Key Required</label>
       <div class="row">
@@ -54,17 +68,6 @@
         <button id="copy-output" class="link-btn" type="button">Copy</button>
       </div>
       <textarea id="output-text" rows="5" readonly></textarea>
-    </div>
-
-    <div id="shortcuts-card" class="card hidden">
-      <div class="row-between" style="margin-bottom: 6px;">
-        <label style="margin-bottom: 0;">Extension Shortcuts</label>
-        <button id="close-shortcuts" class="link-btn" type="button">Close</button>
-      </div>
-      <div id="shortcuts-list" class="hint" style="margin-bottom: 6px;"></div>
-      <div class="hint">
-        In Orion / Safari-based browsers, <code>chrome://extensions/shortcuts</code> is unavailable. Manage shortcuts in <b>Orion → Settings → Extensions</b> or <b>System Settings → Keyboard Shortcuts</b>.
-      </div>
     </div>
 
     <div class="hint">
