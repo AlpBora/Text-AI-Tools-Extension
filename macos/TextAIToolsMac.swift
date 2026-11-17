@@ -1005,8 +1005,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         var x: CGFloat
         var y: CGFloat
         if let anchor = anchorRect {
-            // Place neatly below the selected text (with 14px breathing room) so the text stays visible
-            x = anchor.minX
+            // Align neatly under the bottom-right of the selected text (or left edge for short single-word selections)
+            x = max(anchor.minX, anchor.maxX - width)
             y = anchor.minY - height - 14
             if y < screenFrame.minY + 12 {
                 // If not enough room below, place neatly above the selected text
