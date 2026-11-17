@@ -451,6 +451,44 @@ describe("M2: Turkish Morphology, Deasciifier, Homographs & Ambiguity Integratio
     assert.equal(ctxRes.decision, "auto_correct");
     assert.equal(ctxRes.replacement, "şöyle");
   });
+
+  it("flags Turkish homograph twins (takip / takıp) and cross-lingual EN/TR homographs (Once / Önce) as uncertain", () => {
+    const takipRes = SpellcheckEngine.checkWord({
+      word: "takip",
+      primaryLang: "tr",
+      secondaryLang: "en",
+      lexiconsByLang: LEXICONS,
+      autoCorrectEnabled: true,
+    });
+    assert.equal(takipRes.decision, "uncertain");
+    const takipWords = takipRes.candidates.map((c) => c.word);
+    assert.ok(takipWords.includes("takip"));
+    assert.ok(takipWords.includes("takıp"));
+
+    const onceEnPrimary = SpellcheckEngine.checkWord({
+      word: "Once",
+      contextTokens: [],
+      primaryLang: "en",
+      secondaryLang: "tr",
+      lexiconsByLang: LEXICONS,
+      autoCorrectEnabled: true,
+    });
+    assert.equal(onceEnPrimary.decision, "uncertain");
+    const onceWords = onceEnPrimary.candidates.map((c) => c.word);
+    assert.ok(onceWords.includes("Önce"));
+    assert.ok(onceWords.includes("Once"));
+
+    // Strong English context still keeps "once" valid
+    const onceStrongEn = SpellcheckEngine.checkWord({
+      word: "once",
+      contextTokens: ["I", "went", "there"],
+      primaryLang: "en",
+      secondaryLang: "tr",
+      lexiconsByLang: LEXICONS,
+      autoCorrectEnabled: true,
+    });
+    assert.equal(onceStrongEn.decision, "valid");
+  });
 });
 
 describe("M2: Bilingual Code-Switching & Custom Unbundled Languages", () => {

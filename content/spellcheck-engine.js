@@ -1031,8 +1031,9 @@
       };
     }
 
-    // Pre-check if Turkish deasciifier has an unambiguous diacritic restoration for pure-ASCII input
+    // Pre-check if Turkish deasciifier has an unambiguous diacritic restoration or a genuine 5+ char homograph twin
     let preDeascTr = null;
+    let trHomographAlts = null;
     if (
       activeWithLexicon.includes("tr") &&
       normLexicons.tr &&
@@ -1041,13 +1042,37 @@
       !/[çğıöşüâîûÇĞİÖŞÜÂÎÛ]/.test(cleanWord)
     ) {
       const dRes = deasciifier.deasciifyWord(cleanWord, normLexicons.tr, morph);
+      const trIdx = getLexiconIndex(normLexicons.tr, getProfile("tr"));
       if (dRes && dRes.status === "unambiguous" && dRes.candidates && dRes.candidates.length > 0) {
         const topTrWord = trLower(dRes.candidates[0].word);
-        const trIdx = getLexiconIndex(normLexicons.tr, getProfile("tr"));
         const trFreq = (trIdx && trIdx.exactMap.get(topTrWord)) || 0;
         preDeascTr = { dRes, topTrWord, trFreq };
+      } else if (
+        dRes &&
+        dRes.status === "homograph_kept" &&
+        cleanWord.length >= 5 &&
+        !(trLowerWord.startsWith("ol")) &&
+        !/^m[iıuü]/.test(trLowerWord)
+      ) {
+        const filteredAlts = (dRes.candidates || []).filter((c) => {
+          const cLow = trLower(c.word);
+          if (cLow === trLowerWord) return false;
+          // Skip circumflex-only spelling variants (e.g., herhalde/herhâlde, tabii/tabiî)
+          const noCirc = cLow.replace(/â/g, "a").replace(/î/g, "i").replace(/û/g, "u");
+          if (noCirc === trLowerWord) return false;
+          const altFreq = (trIdx && trIdx.exactMap.get(cLow)) || 0;
+          return altFreq >= 280;
+        });
+        if (filteredAlts.length > 0) {
+          trHomographAlts = filteredAlts;
+        }
       }
     }
+
+    const hasStrongEnContext =
+      Array.isArray(contextSlice) &&
+      contextSlice.length >= 2 &&
+      (guess.scores.en ?? 0) - (guess.scores.tr ?? 0) >= 1.5;
 
     const COLLOQUIAL_TR_KEYS = new Set([
       "bikac", "bisi", "bisey", "birsey", "bisiler", "biseyler", "birseyler",
@@ -1063,13 +1088,41 @@
         if (langId === "tr" && (preDeascTr || isColloquialTrKey)) {
           continue;
         }
+        if (langId === "tr" && trHomographAlts && trHomographAlts.length > 0) {
+          const cands = [
+            { word: cleanWord, score: 0.90, source: "homograph", lang: "tr" },
+            ...trHomographAlts.slice(0, 4).map((a, idx) => ({
+              word: a.word,
+              score: Number((0.88 - idx * 0.03).toFixed(4)),
+              source: "deasciify",
+              lang: "tr",
+            })),
+          ];
+          return {
+            valid: false,
+            decision: "uncertain",
+            detectedLang: "tr",
+            candidates: cands,
+          };
+        }
         // - Or in a secondary language when Turkish is the active context/primary language and the Turkish
         //   diacritic word is higher-frequency than the secondary-language homograph (e.g. gore -> göre, boyle -> böyle, gun -> gün, once -> önce)
-        if (langId !== "tr" && guess.primary === "tr" && preDeascTr && preDeascTr.trFreq >= 420) {
+        if (langId !== "tr" && preDeascTr && preDeascTr.trFreq >= 420) {
           const secIdx = getLexiconIndex(normLexicons[langId], profile);
           const secFreq = (secIdx && secIdx.exactMap.get(cleanWord.toLowerCase())) || 0;
-          if (preDeascTr.trFreq > secFreq) {
+          if (guess.primary === "tr" && preDeascTr.trFreq > secFreq) {
             continue;
+          }
+          if (cleanWord.length >= 4 && preDeascTr.trFreq >= 500 && !hasStrongEnContext) {
+            return {
+              valid: false,
+              decision: "uncertain",
+              detectedLang: langId,
+              candidates: [
+                { word: preDeascTr.dRes.candidates[0].word, score: 0.89, source: "deasciify", lang: "tr" },
+                { word: cleanWord, score: 0.88, source: "homograph", lang: langId },
+              ],
+            };
           }
         }
         return {
