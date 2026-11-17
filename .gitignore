@@ -1,6 +1,7 @@
 .DS_Store
 .agents/
 node_modules/
+macos/build/
 PROJECT.md
 TEST_INFRA.md
 TEST_READY.md

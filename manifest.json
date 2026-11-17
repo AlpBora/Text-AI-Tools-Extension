@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Text AI Tools",
-  "version": "1.6.2",
+  "version": "1.7.0",
   "description": "Offline word-end spellchecking with Turkish morphology & bilingual matching, plus optional Gemini grammar, fluency, translation, and summarization tools.",
   "permissions": [
     "contextMenus",
