@@ -8,7 +8,7 @@ Works with **any AI provider / model** (bring your own API key or local model) i
 
 ---
 
-## 1. Browser Extension (Chromium & Orion)
+## 1. Browser Extension
 
 1. Clone or download this repository.
 2. Open your browser's extensions page (`chrome://extensions` or **Settings → Extensions**) and enable **Developer mode**.
