@@ -28,7 +28,7 @@ const PersonalModel = require(path.join(ROOT_DIR, "content", "personal-model.js"
 const SpellcheckEngine = require(path.join(ROOT_DIR, "content", "spellcheck-engine.js"));
 
 const actionsMod = await import(pathToFileURL(path.join(ROOT_DIR, "shared", "actions.js")).href);
-const { ACTIONS, callGemini } = actionsMod;
+const { ACTIONS, AI_PROVIDERS, callAI, detectProviderFromApiKey, resolveProviderConfig } = actionsMod;
 
 const STATE_DIR = path.join(os.homedir(), ".text-ai-tools");
 const CONFIG_PATH = path.join(STATE_DIR, "config.json");
@@ -89,6 +89,8 @@ function loadConfig() {
     primaryLanguage: "Turkish",
     secondaryLanguage: "English",
     autoCorrectEnabled: true,
+    provider: "gemini",
+    customBaseUrl: "",
     model: "gemini-3.5-flash-lite",
     hotkey: {
       keyCode: 47,
@@ -219,6 +221,8 @@ export async function handleRequest(req) {
         secondaryLanguage: config.secondaryLanguage,
         autoCorrectEnabled: config.autoCorrectEnabled !== false,
         hasApiKey: Boolean(config.apiKey),
+        provider: config.provider || "gemini",
+        customBaseUrl: config.customBaseUrl || "",
         model: config.model,
         hotkey: config.hotkey,
       },
@@ -227,12 +231,28 @@ export async function handleRequest(req) {
 
   if (req.type === "setConfig") {
     let nextKey = config.apiKey;
+    let detectedProvider = null;
     if (typeof req.apiKey === "string" && req.apiKey.trim()) {
       nextKey = req.apiKey.trim();
       saveApiKeyToKeychain(nextKey);
+      detectedProvider = detectProviderFromApiKey(nextKey);
     }
+    const nextProvider =
+      typeof req.provider === "string" && AI_PROVIDERS[req.provider]
+        ? req.provider
+        : detectedProvider || config.provider || "gemini";
+    const nextProfile = AI_PROVIDERS[nextProvider] || AI_PROVIDERS.gemini;
+    const nextModel =
+      typeof req.model === "string" && req.model.trim()
+        ? req.model.trim()
+        : nextProvider !== config.provider
+          ? nextProfile.defaultModel
+          : config.model;
     config = {
       ...config,
+      provider: nextProvider,
+      customBaseUrl: typeof req.customBaseUrl === "string" ? req.customBaseUrl.trim() : config.customBaseUrl || "",
+      model: nextModel,
       ...(req.primaryLanguage ? { primaryLanguage: String(req.primaryLanguage) } : {}),
       ...(req.secondaryLanguage ? { secondaryLanguage: String(req.secondaryLanguage) } : {}),
       ...(typeof req.autoCorrectEnabled === "boolean" ? { autoCorrectEnabled: req.autoCorrectEnabled } : {}),
@@ -293,16 +313,19 @@ export async function handleRequest(req) {
     if (!config.apiKey) {
       config.apiKey = readApiKeyFromKeychain() || process.env.GEMINI_API_KEY || "";
     }
-    if (!config.apiKey) {
+    const providerCfg = resolveProviderConfig(config.provider, config.customBaseUrl);
+    if (providerCfg.requiresKey && !config.apiKey) {
       return {
         ok: false,
         id: req.id,
         code: "MISSING_API_KEY",
-        error: "Gemini API key not found in macOS Keychain.",
+        error: `${providerCfg.label} API key not found in macOS Keychain.`,
       };
     }
     try {
-      const output = await callGemini({
+      const output = await callAI({
+        provider: config.provider,
+        customBaseUrl: config.customBaseUrl,
         apiKey: config.apiKey,
         model: config.model,
         actionId,

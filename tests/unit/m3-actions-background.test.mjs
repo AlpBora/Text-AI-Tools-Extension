@@ -166,12 +166,12 @@ describe("M3 manifest.json & UI contracts", () => {
     ]);
   });
 
-  it("options.html includes API key security-boundary disclosure, model datalist, and spellcheck toggles", () => {
+  it("options.html includes provider selector, concise local storage disclosure, model datalist, and spellcheck toggles", () => {
     const html = fs.readFileSync(path.join(ROOT_DIR, "options.html"), "utf8");
+    assert.match(html, /id="provider"/);
+    assert.match(html, /id="custom-base-url"/);
     assert.match(html, /id="api-security-notice"/);
     assert.match(html, /chrome\.storage\.local/);
-    assert.match(html, /Native Messaging/i);
-    assert.match(html, /proxy server/i);
     assert.match(html, /value="gemini-3\.5-flash-lite"/);
     assert.match(html, /value="gemini-3\.8-flash"/);
     assert.match(html, /value="gemini-flash-lite-latest"/);
@@ -209,6 +209,8 @@ describe("M3 shared/actions.js (Gemini 3.5+ & retry logic)", () => {
 
     const defaults = await actions.getSettings();
     assert.deepEqual(defaults, {
+      provider: "gemini",
+      customBaseUrl: "",
       apiKey: "",
       model: "gemini-3.5-flash-lite",
       primaryLanguage: "Turkish",
@@ -230,6 +232,8 @@ describe("M3 shared/actions.js (Gemini 3.5+ & retry logic)", () => {
 
     const updated = await actions.getSettings();
     assert.deepEqual(updated, {
+      provider: "gemini",
+      customBaseUrl: "",
       apiKey: "AIzaTestKey123",
       model: "gemini-3.8-flash",
       primaryLanguage: "German",
@@ -462,6 +466,52 @@ describe("M3 shared/actions.js (Gemini 3.5+ & retry logic)", () => {
       { word: "psychology", reason: "Matches phonetic 'saykoloci' in context" },
       { word: "psychiatry", reason: "Related clinical term" }
     ]);
+  });
+
+  it("detectProviderFromApiKey identifies Gemini, OpenRouter, Groq, and OpenAI prefixes", async () => {
+    const { detectProviderFromApiKey } = await import("../../shared/actions.js");
+    assert.equal(detectProviderFromApiKey("AIzaSyTest123"), "gemini");
+    assert.equal(detectProviderFromApiKey("sk-or-v1-abc123"), "openrouter");
+    assert.equal(detectProviderFromApiKey("gsk_test123"), "groq");
+    assert.equal(detectProviderFromApiKey("sk-proj-abc123"), "openai");
+    assert.equal(detectProviderFromApiKey("unknown-key"), null);
+  });
+
+  it("callAI supports OpenAI-compatible providers (OpenAI / OpenRouter / Custom)", async () => {
+    let capturedUrl = "";
+    let capturedHeaders = null;
+    let capturedBody = null;
+    globalThis.fetch = async (url, init) => {
+      capturedUrl = url;
+      capturedHeaders = init.headers;
+      capturedBody = JSON.parse(init.body);
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return {
+            choices: [{ message: { content: "Fixed OpenAI text." } }]
+          };
+        }
+      };
+    };
+
+    const { callAI } = await import("../../shared/actions.js");
+    const output = await callAI({
+      provider: "openrouter",
+      apiKey: "sk-or-v1-test",
+      model: "openai/gpt-4o-mini",
+      actionId: "fix",
+      text: "broken text",
+      retryBaseDelayMs: 0
+    });
+
+    assert.equal(capturedUrl, "https://openrouter.ai/api/v1/chat/completions");
+    assert.equal(capturedHeaders.Authorization, "Bearer sk-or-v1-test");
+    assert.equal(capturedBody.model, "openai/gpt-4o-mini");
+    assert.equal(capturedBody.messages[0].role, "system");
+    assert.equal(capturedBody.messages[1].content, "broken text");
+    assert.equal(output, "Fixed OpenAI text.");
   });
 });
 

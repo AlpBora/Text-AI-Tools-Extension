@@ -1,9 +1,10 @@
 import {
   ACTIONS,
-  callGemini,
+  callAI,
   fetchContextualWordSuggestions,
   fetchSentenceSuggestions,
-  getSettings
+  getSettings,
+  resolveProviderConfig
 } from "./shared/actions.js";
 
 const PARENT_MENU_ID = "text-ai-tools-root";
@@ -136,12 +137,13 @@ export async function handleTabAction(tabId, actionId, fallbackSelection = "", f
   }
 
   const settings = await getSettings();
-  if (!settings.apiKey) {
+  const providerCfg = resolveProviderConfig(settings.provider, settings.customBaseUrl);
+  if (providerCfg.requiresKey && !settings.apiKey) {
     await sendMessageToTab(
       tabId,
       {
         type: "showError",
-        message: "Please set your Gemini API key first.",
+        message: `Please set your ${providerCfg.label} API key first.`,
         openOptions: true
       },
       frameId
@@ -171,7 +173,9 @@ export async function handleTabAction(tabId, actionId, fallbackSelection = "", f
   );
 
   try {
-    const result = await callGemini({
+    const result = await callAI({
+      provider: settings.provider,
+      customBaseUrl: settings.customBaseUrl,
       apiKey: settings.apiKey,
       model: settings.model,
       actionId,
@@ -219,15 +223,18 @@ export async function handleRuntimeMessage(msg, sender) {
       return { ok: false, error: `Unknown action: ${msg.actionId}` };
     }
     const settings = await getSettings();
-    if (!settings.apiKey) {
+    const providerCfg = resolveProviderConfig(settings.provider, settings.customBaseUrl);
+    if (providerCfg.requiresKey && !settings.apiKey) {
       return {
         ok: false,
-        error: "Please set your Gemini API key in Settings first.",
+        error: `Please set your ${providerCfg.label} API key in Settings first.`,
         openOptions: true
       };
     }
     try {
-      const result = await callGemini({
+      const result = await callAI({
+        provider: settings.provider,
+        customBaseUrl: settings.customBaseUrl,
         apiKey: settings.apiKey,
         model: settings.model,
         actionId: msg.actionId,
@@ -248,10 +255,11 @@ export async function handleRuntimeMessage(msg, sender) {
 
   if (msg.type === "geminiSentenceSuggestions") {
     const settings = await getSettings();
-    if (!settings.apiKey) {
+    const providerCfg = resolveProviderConfig(settings.provider, settings.customBaseUrl);
+    if (providerCfg.requiresKey && !settings.apiKey) {
       return {
         ok: false,
-        error: "Please set your Gemini API key in Settings first.",
+        error: `Please set your ${providerCfg.label} API key in Settings first.`,
         openOptions: true
       };
     }
@@ -261,6 +269,8 @@ export async function handleRuntimeMessage(msg, sender) {
         mode: msg.mode || "sentence",
         primaryLanguage: msg.primaryLang || settings.primaryLanguage,
         secondaryLanguage: msg.secondaryLang || settings.secondaryLanguage,
+        provider: settings.provider,
+        customBaseUrl: settings.customBaseUrl,
         apiKey: settings.apiKey,
         model: settings.model
       });
@@ -272,10 +282,11 @@ export async function handleRuntimeMessage(msg, sender) {
 
   if (msg.type === "geminiContextualWord") {
     const settings = await getSettings();
-    if (!settings.apiKey) {
+    const providerCfg = resolveProviderConfig(settings.provider, settings.customBaseUrl);
+    if (providerCfg.requiresKey && !settings.apiKey) {
       return {
         ok: false,
-        error: "Please set your Gemini API key in Settings first.",
+        error: `Please set your ${providerCfg.label} API key in Settings first.`,
         openOptions: true
       };
     }
@@ -285,6 +296,8 @@ export async function handleRuntimeMessage(msg, sender) {
         targetWord: msg.targetWord,
         primaryLanguage: msg.primaryLang || settings.primaryLanguage,
         secondaryLanguage: msg.secondaryLang || settings.secondaryLanguage,
+        provider: settings.provider,
+        customBaseUrl: settings.customBaseUrl,
         apiKey: settings.apiKey,
         model: settings.model
       });

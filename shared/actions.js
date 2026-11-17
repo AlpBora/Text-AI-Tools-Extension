@@ -1,13 +1,83 @@
+export const DEFAULT_PROVIDER = "gemini";
 export const DEFAULT_MODEL = "gemini-3.5-flash-lite";
 export const DEFAULT_PRIMARY_LANGUAGE = "Turkish";
 export const DEFAULT_SECONDARY_LANGUAGE = "English";
-export const SUPPORTED_MODELS = [
-  "gemini-3.5-flash-lite",
-  "gemini-3.8-flash",
-  "gemini-flash-lite-latest"
-];
+export const AI_PROVIDERS = {
+  gemini: {
+    id: "gemini",
+    label: "Google Gemini",
+    defaultModel: "gemini-3.5-flash-lite",
+    models: ["gemini-3.5-flash-lite", "gemini-3.8-flash", "gemini-flash-lite-latest"],
+    baseUrl: "https://generativelanguage.googleapis.com/v1beta",
+    requiresKey: true,
+    apiKeyPlaceholder: "AIza..."
+  },
+  openai: {
+    id: "openai",
+    label: "OpenAI",
+    defaultModel: "gpt-4.1-mini",
+    models: ["gpt-4.1-mini", "gpt-4.1-nano", "gpt-4o-mini", "o4-mini"],
+    baseUrl: "https://api.openai.com/v1",
+    requiresKey: true,
+    apiKeyPlaceholder: "sk-..."
+  },
+  openrouter: {
+    id: "openrouter",
+    label: "OpenRouter",
+    defaultModel: "openai/gpt-4o-mini",
+    models: [
+      "openai/gpt-4o-mini",
+      "google/gemini-2.5-flash",
+      "anthropic/claude-3.5-sonnet",
+      "meta-llama/llama-3.3-70b-instruct"
+    ],
+    baseUrl: "https://openrouter.ai/api/v1",
+    requiresKey: true,
+    apiKeyPlaceholder: "sk-or-v1-..."
+  },
+  groq: {
+    id: "groq",
+    label: "Groq",
+    defaultModel: "llama-3.3-70b-versatile",
+    models: ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"],
+    baseUrl: "https://api.groq.com/openai/v1",
+    requiresKey: true,
+    apiKeyPlaceholder: "gsk_..."
+  },
+  custom: {
+    id: "custom",
+    label: "Custom / Local (OpenAI-Compatible)",
+    defaultModel: "llama3.2",
+    models: ["llama3.2", "qwen2.5:7b", "gemma3"],
+    baseUrl: "http://localhost:11434/v1",
+    requiresKey: false,
+    apiKeyPlaceholder: "Optional for local Ollama / LM Studio"
+  }
+};
+export const SUPPORTED_MODELS = AI_PROVIDERS.gemini.models;
+
+export function detectProviderFromApiKey(apiKey) {
+  const key = String(apiKey || "").trim();
+  if (!key) return null;
+  if (key.startsWith("AIza")) return "gemini";
+  if (key.startsWith("sk-or-")) return "openrouter";
+  if (key.startsWith("gsk_")) return "groq";
+  if (key.startsWith("sk-")) return "openai";
+  return null;
+}
+
+export function resolveProviderConfig(provider = DEFAULT_PROVIDER, customBaseUrl = "") {
+  const profile = AI_PROVIDERS[provider] || AI_PROVIDERS[DEFAULT_PROVIDER];
+  const baseUrl =
+    profile.id === "custom"
+      ? (String(customBaseUrl || "").trim() || profile.baseUrl).replace(/\/+$/, "")
+      : profile.baseUrl;
+  return { ...profile, baseUrl };
+}
 
 export const DEFAULT_SETTINGS = {
+  provider: DEFAULT_PROVIDER,
+  customBaseUrl: "",
   apiKey: "",
   model: DEFAULT_MODEL,
   primaryLanguage: DEFAULT_PRIMARY_LANGUAGE,
@@ -141,9 +211,13 @@ export function buildSystemPrompt(actionId, { primaryLanguage, secondaryLanguage
 
 export async function getSettings() {
   const data = await chrome.storage.local.get(DEFAULT_SETTINGS);
+  const provider = AI_PROVIDERS[data.provider] ? data.provider : DEFAULT_PROVIDER;
+  const profile = AI_PROVIDERS[provider];
   return {
+    provider,
+    customBaseUrl: (data.customBaseUrl || "").trim(),
     apiKey: (data.apiKey || "").trim(),
-    model: (data.model || DEFAULT_MODEL).trim() || DEFAULT_MODEL,
+    model: (data.model || profile.defaultModel).trim() || profile.defaultModel,
     primaryLanguage: (data.primaryLanguage || DEFAULT_PRIMARY_LANGUAGE).trim() || DEFAULT_PRIMARY_LANGUAGE,
     secondaryLanguage: (data.secondaryLanguage || DEFAULT_SECONDARY_LANGUAGE).trim() || DEFAULT_SECONDARY_LANGUAGE,
     copyOnReplace: Boolean(data.copyOnReplace),
@@ -175,42 +249,71 @@ function parseStructuredJson(rawText) {
   }
 }
 
-async function requestGemini({
+async function requestAI({
+  provider = DEFAULT_PROVIDER,
+  customBaseUrl = "",
   apiKey,
-  model = DEFAULT_MODEL,
+  model,
   systemPrompt,
   userText,
   generationConfig = null,
+  jsonMode = false,
   retryBaseDelayMs = 2000
 }) {
+  const providerCfg = resolveProviderConfig(provider, customBaseUrl);
   const cleanKey = (apiKey || "").trim();
-  if (!cleanKey) {
-    throw new GeminiRequestError("Gemini API key is not configured.", { retryable: false });
+  if (providerCfg.requiresKey && !cleanKey) {
+    throw new GeminiRequestError(`${providerCfg.label} API key is not configured.`, { retryable: false });
   }
   if (!userText || !String(userText).trim()) {
     throw new GeminiRequestError("Select or enter some text first.", { retryable: false });
   }
   if (
-    String(userText).trim() === cleanKey ||
-    (cleanKey.length >= 12 && String(userText).includes(cleanKey))
+    cleanKey &&
+    (String(userText).trim() === cleanKey ||
+      (cleanKey.length >= 12 && String(userText).includes(cleanKey)))
   ) {
     throw new GeminiRequestError("API key detected in text; aborted for safety.", { retryable: false });
   }
 
-  const resolvedModel = (model || DEFAULT_MODEL).trim() || DEFAULT_MODEL;
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
-    resolvedModel
-  )}:generateContent`;
+  const resolvedModel = (model || providerCfg.defaultModel).trim() || providerCfg.defaultModel;
+  const isGemini = providerCfg.id === "gemini";
 
-  const payload = {
-    system_instruction: { parts: [{ text: systemPrompt }] },
-    contents: [{ role: "user", parts: [{ text: String(userText) }] }]
-  };
-  if (generationConfig && Object.keys(generationConfig).length > 0) {
-    payload.generationConfig = generationConfig;
+  let endpoint;
+  let headers;
+  let payload;
+  if (isGemini) {
+    endpoint = `${providerCfg.baseUrl}/models/${encodeURIComponent(resolvedModel)}:generateContent`;
+    headers = {
+      "x-goog-api-key": cleanKey,
+      "Content-Type": "application/json"
+    };
+    payload = {
+      system_instruction: { parts: [{ text: systemPrompt }] },
+      contents: [{ role: "user", parts: [{ text: String(userText) }] }]
+    };
+    if (generationConfig && Object.keys(generationConfig).length > 0) {
+      payload.generationConfig = generationConfig;
+    }
+  } else {
+    endpoint = `${providerCfg.baseUrl}/chat/completions`;
+    headers = { "Content-Type": "application/json" };
+    if (cleanKey) {
+      headers.Authorization = `Bearer ${cleanKey}`;
+    }
+    payload = {
+      model: resolvedModel,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: String(userText) }
+      ]
+    };
+    if (jsonMode) {
+      payload.response_format = { type: "json_object" };
+    }
   }
-  const body = JSON.stringify(payload);
 
+  let body = JSON.stringify(payload);
   let lastError = null;
   for (let attempt = 0; attempt < 3; attempt++) {
     const controller = new AbortController();
@@ -218,16 +321,18 @@ async function requestGemini({
     try {
       const res = await fetch(endpoint, {
         method: "POST",
-        headers: {
-          "x-goog-api-key": cleanKey,
-          "Content-Type": "application/json"
-        },
+        headers,
         body,
         signal: controller.signal
       });
 
       if (!res.ok) {
         const detail = await res.text();
+        if (!isGemini && jsonMode && payload.response_format && res.status === 400) {
+          delete payload.response_format;
+          body = JSON.stringify(payload);
+          continue;
+        }
         const isRetryable = RETRYABLE_HTTP_STATUSES.has(res.status);
         if (isRetryable && attempt < 2) {
           if (retryBaseDelayMs > 0) {
@@ -242,13 +347,25 @@ async function requestGemini({
       }
 
       const data = await res.json();
-      const parts = data?.candidates?.[0]?.content?.parts;
-      if (!Array.isArray(parts)) {
-        throw new GeminiRequestError("Failed to parse Gemini response.", { retryable: false });
+      let output = "";
+      if (isGemini) {
+        const parts = data?.candidates?.[0]?.content?.parts;
+        if (!Array.isArray(parts)) {
+          throw new GeminiRequestError("Failed to parse AI response.", { retryable: false });
+        }
+        output = parts.map((p) => p?.text || "").join("");
+      } else {
+        const content = data?.choices?.[0]?.message?.content;
+        if (typeof content === "string") {
+          output = content;
+        } else if (Array.isArray(content)) {
+          output = content.map((p) => (typeof p === "string" ? p : p?.text || "")).join("");
+        } else {
+          throw new GeminiRequestError("Failed to parse AI response.", { retryable: false });
+        }
       }
-      const output = parts.map((p) => p?.text || "").join("");
       if (!output) {
-        throw new GeminiRequestError("Gemini returned an empty response.", { retryable: false });
+        throw new GeminiRequestError(`${providerCfg.label} returned an empty response.`, { retryable: false });
       }
       return output;
     } catch (err) {
@@ -263,12 +380,14 @@ async function requestGemini({
       clearTimeout(timeoutId);
     }
   }
-  throw lastError || new Error("Gemini API request failed.");
+  throw lastError || new Error("AI API request failed.");
 }
 
-export async function callGemini({
+export async function callAI({
+  provider = DEFAULT_PROVIDER,
+  customBaseUrl = "",
   apiKey,
-  model = DEFAULT_MODEL,
+  model,
   actionId,
   text,
   primaryLanguage = DEFAULT_PRIMARY_LANGUAGE,
@@ -281,7 +400,9 @@ export async function callGemini({
   }
 
   const systemPrompt = buildSystemPrompt(actionId, { primaryLanguage, secondaryLanguage });
-  return requestGemini({
+  return requestAI({
+    provider,
+    customBaseUrl,
     apiKey,
     model,
     systemPrompt,
@@ -290,13 +411,17 @@ export async function callGemini({
   });
 }
 
+export const callGemini = callAI;
+
 export async function fetchSentenceSuggestions({
   text,
   mode = "sentence",
   primaryLanguage = DEFAULT_PRIMARY_LANGUAGE,
   secondaryLanguage = DEFAULT_SECONDARY_LANGUAGE,
+  provider = DEFAULT_PROVIDER,
+  customBaseUrl = "",
   apiKey,
-  model = DEFAULT_MODEL,
+  model,
   retryBaseDelayMs = 2000
 }) {
   const primary = (primaryLanguage || DEFAULT_PRIMARY_LANGUAGE).trim() || DEFAULT_PRIMARY_LANGUAGE;
@@ -308,10 +433,13 @@ export async function fetchSentenceSuggestions({
     `Analyze ONLY the provided ${targetLabel}. Detect its language and keep the output in that same language.`,
     `Return 2 to 4 practical rewrite options covering "grammar" (fixing spelling/grammar/punctuation), "fluency" (more natural/clear phrasing), and "professional" (polite/formal wording).`,
     `Each option's "text" must be a complete drop-in replacement for ONLY that ${targetLabel}, with no surrounding quotes or commentary.`,
-    `Provide a short "label" (2-4 words) and a brief optional "explanation".`
+    `Provide a short "label" (2-4 words) and a brief optional "explanation".`,
+    `Respond ONLY with valid JSON matching: {"options":[{"category":"grammar"|"fluency"|"professional","label":"...","text":"...","explanation":"..."}]}.`
   ].join(" ");
 
-  const raw = await requestGemini({
+  const raw = await requestAI({
+    provider,
+    customBaseUrl,
     apiKey,
     model,
     systemPrompt,
@@ -320,6 +448,7 @@ export async function fetchSentenceSuggestions({
       responseMimeType: "application/json",
       responseJsonSchema: SENTENCE_SUGGESTIONS_SCHEMA
     },
+    jsonMode: true,
     retryBaseDelayMs
   });
 
@@ -359,8 +488,10 @@ export async function fetchContextualWordSuggestions({
   targetWord,
   primaryLanguage = DEFAULT_PRIMARY_LANGUAGE,
   secondaryLanguage = DEFAULT_SECONDARY_LANGUAGE,
+  provider = DEFAULT_PROVIDER,
+  customBaseUrl = "",
   apiKey,
-  model = DEFAULT_MODEL,
+  model,
   retryBaseDelayMs = 2000
 }) {
   const cleanTarget = String(targetWord || "").trim();
@@ -378,12 +509,15 @@ export async function fetchContextualWordSuggestions({
   const systemPrompt = [
     `You help a bilingual writer (${primary} and ${secondary}) find the exact intended word when they typed an approximate, phonetic, or misspelled token.`,
     `Given the sentence context and the target token, infer the intended meaning and return 3 to 5 replacement words ranked from most likely to least likely.`,
-    `Match the language, inflection, and casing of the sentence context. Return only single-word (or tight compound) replacements in "word" and a concise "reason".`
+    `Match the language, inflection, and casing of the sentence context. Return only single-word (or tight compound) replacements in "word" and a concise "reason".`,
+    `Respond ONLY with valid JSON matching: {"suggestions":[{"word":"...","reason":"..."}]}.`
   ].join(" ");
 
   const userText = `Sentence context: ${cleanSentence}\nTarget word: ${cleanTarget}`;
 
-  const raw = await requestGemini({
+  const raw = await requestAI({
+    provider,
+    customBaseUrl,
     apiKey,
     model,
     systemPrompt,
@@ -392,6 +526,7 @@ export async function fetchContextualWordSuggestions({
       responseMimeType: "application/json",
       responseJsonSchema: CONTEXTUAL_WORD_SCHEMA
     },
+    jsonMode: true,
     retryBaseDelayMs
   });
 
