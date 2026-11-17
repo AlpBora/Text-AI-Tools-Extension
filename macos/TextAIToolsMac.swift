@@ -295,6 +295,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }()
     private var actionPanel: InlineActionPanel?
     private var savedFrontApp: NSRunningApplication?
+    private var mouseMonitor: Any?
 
     private struct HotkeyConfig {
         var keyCode: Int64 = 47
@@ -317,6 +318,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         setupMenuBar()
         loadSavedHotkey()
         requestAccessibilityIfNeeded()
+        startMouseMonitor()
         startEventTap()
         startAutoUpdateLoop()
         if eventTap == nil {
@@ -333,7 +335,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        if let tap = eventTap {
+            CGEvent.tapEnable(tap: tap, enable: false)
+            eventTap = nil
+        }
+        if let m = mouseMonitor {
+            NSEvent.removeMonitor(m)
+            mouseMonitor = nil
+        }
         worker?.stop()
+    }
+
+    private func startMouseMonitor() {
+        mouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
+            self?.wordBuffer = ""
+            self?.lastUndo = nil
+        }
     }
 
     private func makeHandPenMenuBarImage() -> NSImage {
@@ -657,13 +674,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func isFocusedFieldSecure() -> Bool {
         let sys = AXUIElementCreateSystemWide()
+        AXUIElementSetMessagingTimeout(sys, 0.05)
         var focusedRef: CFTypeRef?
         guard AXUIElementCopyAttributeValue(sys, kAXFocusedUIElementAttribute as CFString, &focusedRef) == .success,
               let focused = focusedRef else {
             return false
         }
+        let axEl = focused as! AXUIElement
+        AXUIElementSetMessagingTimeout(axEl, 0.05)
         var roleRef: CFTypeRef?
-        if AXUIElementCopyAttributeValue(focused as! AXUIElement, kAXRoleAttribute as CFString, &roleRef) == .success,
+        if AXUIElementCopyAttributeValue(axEl, kAXRoleAttribute as CFString, &roleRef) == .success,
            let role = roleRef as? String {
             return role == "AXSecureTextField"
         }
@@ -671,9 +691,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func startEventTap() {
-        let mask = (1 << CGEventType.keyDown.rawValue) |
-                   (1 << CGEventType.leftMouseDown.rawValue) |
-                   (1 << CGEventType.rightMouseDown.rawValue)
+        let mask = (1 << CGEventType.keyDown.rawValue)
 
         let refcon = Unmanaged.passUnretained(self).toOpaque()
         guard let tap = CGEvent.tapCreate(
@@ -904,12 +922,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func getFocusedSelectionScreenRect() -> NSRect? {
         let sys = AXUIElementCreateSystemWide()
+        AXUIElementSetMessagingTimeout(sys, 0.05)
         var focusedRef: CFTypeRef?
         guard AXUIElementCopyAttributeValue(sys, kAXFocusedUIElementAttribute as CFString, &focusedRef) == .success,
               let focused = focusedRef else {
             return nil
         }
         let axEl = focused as! AXUIElement
+        AXUIElementSetMessagingTimeout(axEl, 0.05)
         var rangeRef: CFTypeRef?
         guard AXUIElementCopyAttributeValue(axEl, kAXSelectedTextRangeAttribute as CFString, &rangeRef) == .success,
               let rangeVal = rangeRef else {
@@ -943,27 +963,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let prevString = pb.string(forType: .string)
         let prevChangeCount = pb.changeCount
 
-        // Send Cmd+C to copy current selection
-        postCommandKey(virtualKey: 8) // 'c'
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.11) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) { [weak self] in
             guard let self = self else { return }
-            let changed = pb.changeCount != prevChangeCount
-            let selectedText = (changed ? pb.string(forType: .string) : nil) ?? ""
+            // Send Cmd+C to copy current selection
+            self.postCommandKey(virtualKey: 8) // 'c'
 
-            // Restore previous clipboard immediately
-            if let prev = prevString {
-                pb.clearContents()
-                pb.setString(prev, forType: .string)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.11) { [weak self] in
+                guard let self = self else { return }
+                let changed = pb.changeCount != prevChangeCount
+                let selectedText = (changed ? pb.string(forType: .string) : nil) ?? ""
+
+                // Restore previous clipboard immediately
+                if let prev = prevString {
+                    pb.clearContents()
+                    pb.setString(prev, forType: .string)
+                }
+
+                let trimmed = selectedText.trimmingCharacters(in: .whitespacesAndNewlines)
+                if trimmed.isEmpty {
+                    self.showQuickStatusPanel(message: "Select text first, then press \(self.hotkey.label)", anchorRect: selectionRect)
+                    return
+                }
+
+                self.showActionMenuPanel(selectedText: selectedText, previousClipboard: prevString, anchorRect: selectionRect)
             }
-
-            let trimmed = selectedText.trimmingCharacters(in: .whitespacesAndNewlines)
-            if trimmed.isEmpty {
-                self.showQuickStatusPanel(message: "Select text first, then press Right ⌘ + .", anchorRect: selectionRect)
-                return
-            }
-
-            self.showActionMenuPanel(selectedText: selectedText, previousClipboard: prevString, anchorRect: selectionRect)
         }
     }
 
