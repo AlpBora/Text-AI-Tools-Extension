@@ -334,6 +334,27 @@ describe("M2: Turkish Morphology, Deasciifier, Homographs & Ambiguity Integratio
     assert.ok(soyleWords.includes("söyle"));
     assert.ok(soyleWords.includes("şöyle"));
   });
+
+  it("auto-corrects agaclık -> ağaçlık, sarkı -> şarkı, and caglayan -> çağlayan without false uncertainty", () => {
+    const cases = [
+      ["agaclık", "ağaçlık"],
+      ["agaclik", "ağaçlık"],
+      ["sarkı", "şarkı"],
+      ["sarki", "şarkı"],
+      ["caglayan", "çağlayan"],
+    ];
+    for (const [input, expected] of cases) {
+      const res = SpellcheckEngine.checkWord({
+        word: input,
+        primaryLang: "tr",
+        secondaryLang: "en",
+        lexiconsByLang: LEXICONS,
+        autoCorrectEnabled: true,
+      });
+      assert.equal(res.decision, "auto_correct", `Expected auto_correct for "${input}", got ${res.decision}`);
+      assert.equal(res.replacement, expected);
+    }
+  });
 });
 
 describe("M2: Bilingual Code-Switching & Custom Unbundled Languages", () => {

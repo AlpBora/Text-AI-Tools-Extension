@@ -187,6 +187,7 @@
 
     const sortedAll = Array.from(candMap.values()).sort((a, b) => {
       if (b.freq !== a.freq) return b.freq - a.freq;
+      if (b.isRoot !== a.isRoot) return (b.isRoot ? 1 : 0) - (a.isRoot ? 1 : 0);
       return b.score - a.score;
     });
 
@@ -224,11 +225,19 @@
       return { status: "unambiguous", candidates: formatted };
     }
 
-    // Multiple valid diacritic targets exist (e.g., uc -> uç / üç, cok -> çok / çök):
-    // Only auto-resolve as unambiguous when #1 overwhelmingly dominates #2 by corpus frequency (> 150x ratio).
+    // Multiple valid diacritic targets exist (e.g., uc -> uç / üç, soyle -> söyle / şöyle):
+    // Auto-resolve as unambiguous when:
+    // 1) #1 is an attested corpus word (freq > 0) and #2 has 0 corpus occurrences (unattested/archaic/synthetic), OR
+    // 2) #1 is a dictionary root while #2 is not a root and has low frequency (< 220), OR
+    // 3) #1 strongly dominates #2 by corpus frequency.
     const top = restorations[0];
     const second = restorations[1];
-    if (top.freq >= 400 && (second.freq === 0 || top.freq - second.freq >= 220)) {
+    if (
+      (top.freq > 0 && second.freq === 0) ||
+      (top.isRoot && !second.isRoot && second.freq < 220) ||
+      (top.freq >= 300 && second.freq < 220 && top.freq - second.freq >= 100) ||
+      (top.freq >= 400 && top.freq - second.freq >= 220)
+    ) {
       return { status: "unambiguous", candidates: formatted };
     }
 

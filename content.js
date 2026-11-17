@@ -865,7 +865,7 @@
 
     undoTimer = setTimeout(() => {
       hideUndoPill();
-    }, 8000);
+    }, 1200);
   }
 
   // --- Uncertain Word Popover & Underline ---
@@ -1444,14 +1444,15 @@
       const editor = DomEditor?.resolveEditableTarget(e.target);
       if (!editor) return;
 
-      if (
-        e.key === "Backspace" &&
-        !e.ctrlKey &&
-        !e.metaKey &&
-        !e.altKey &&
+      const isPlainBackspace =
+        e.key === "Backspace" && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey;
+      const isUndoShortcut =
+        (e.ctrlKey || e.metaKey) &&
         !e.shiftKey &&
-        UndoManager
-      ) {
+        !e.altKey &&
+        String(e.key || "").toLowerCase() === "z";
+
+      if ((isPlainBackspace || isUndoShortcut) && UndoManager) {
         const latest = UndoManager.getLatest(editor);
         if (latest && Date.now() - latest.timestamp < 15000) {
           let matchesCurrent = false;
@@ -1495,6 +1496,10 @@
           }
         }
       }
+
+      if (activeUndoState && e.key && e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        hideUndoPill();
+      }
     },
     true
   );
@@ -1511,7 +1516,7 @@
       if (activeUncertain && activeUncertain.editor === editor && !isUncertainSpanStillValid(activeUncertain)) {
         clearUncertainState({ keepMenuIfSuggestion: true });
       }
-      if (activeUndoState && activeUndoState.editor === editor && !isUndoStateStillValid(activeUndoState)) {
+      if (activeUndoState && activeUndoState.editor === editor) {
         hideUndoPill();
       }
 

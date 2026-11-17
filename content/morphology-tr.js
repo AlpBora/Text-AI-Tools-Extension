@@ -873,9 +873,10 @@
         }
       } else {
         // Folded mode: g could be ğ (<- k), c could be ç, d could be t, b could be p
+        // Stem consonant softening ONLY occurs before a vowel-initial suffix (VOWELS.has(remFirst))
         const last = prefix[prefix.length - 1];
         const foldedUnsoften = { b: ["p"], c: ["c"], d: ["t"], g: ["k"] };
-        if (foldedUnsoften[last]) {
+        if (foldedUnsoften[last] && VOWELS.has(remFirst)) {
           for (const orig of foldedUnsoften[last]) {
             const base = prefix.slice(0, -1) + orig;
             const entries = rootMap.get(base);
@@ -889,7 +890,7 @@
             }
           }
         }
-        if (prefix.endsWith("ng")) {
+        if (prefix.endsWith("ng") && VOWELS.has(remFirst)) {
           const base = prefix.slice(0, -1) + "k";
           const entries = rootMap.get(base);
           if (entries) {
@@ -1190,10 +1191,17 @@
           if (isAcceptingState(state)) {
             const cand = state.surface;
             // Verify the generated surface word actually validates cleanly or came from strict FSM
-            const freqBonus = idx.words && idx.words[cand] ? idx.words[cand] / 1000 : 0;
+            const freq = idx.words && idx.words[cand] ? idx.words[cand] : 0;
+            const isKnownRoot = idx.parsedRoots.has(cand);
+            const freqBonus = freq ? freq / 800 : 0;
+            const rootBonus = isKnownRoot ? 0.12 : 0;
+            const unattestedMultiSuffixPenalty = !freq && !isKnownRoot && state.suffixes.length >= 2 ? 0.08 : 0;
             const diacriticDiff = countDiffChars(lower, cand);
             const reason = cost > 0 ? "morph_repair" : "folded_morph";
-            const score = Math.max(0.1, 1.0 - cost * 0.45 - diacriticDiff * 0.015 + freqBonus);
+            const score = Math.max(
+              0.1,
+              1.0 - cost * 0.45 - diacriticDiff * 0.015 + freqBonus + rootBonus - unattestedMultiSuffixPenalty
+            );
             recordCandidate(cand, state.rootEntry.stem, score, reason, {
               hasVowelRepair,
               twoWayHarmonyOnly,

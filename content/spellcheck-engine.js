@@ -757,9 +757,14 @@
             const c = dRes.candidates[i];
             const cLower = trLower(c.word);
             const freq = idx.exactMap.get(cLower) || 0;
-            const baseDeasc = dRes.status === "unambiguous" ? 0.90 : 0.80;
+            const baseDeasc =
+              dRes.status === "unambiguous"
+                ? i === 0
+                  ? 0.94
+                  : 0.74
+                : 0.80;
             const normScore = Number(
-              Math.min(0.99, baseDeasc + (freq / idx.maxFreq) * 0.09 - i * 0.02).toFixed(4)
+              Math.min(0.99, baseDeasc + (freq / idx.maxFreq) * 0.05 - i * 0.03).toFixed(4)
             );
             candidates.push({
               word: c.word,
@@ -1116,19 +1121,27 @@
           const minW = Math.min(c.weightedDist, prev.weightedDist);
           const minR = Math.min(c.rawDist, prev.rawDist);
           const keepPrevSource =
+            prev.source === "deasciify" ||
             (c.source === "phonetic" && prev.source !== "phonetic" && prev.score >= c.score - 0.05) ||
-            (prev.source === "deasciify" && c.source === "morph" && prev.score >= c.score - 0.03);
+            (prev.source === "morph" && c.source === "edit" && prev.score >= c.score - 0.04);
           dedupMap.set(key, {
             ...c,
             weightedDist: minW,
             rawDist: minR,
             source: keepPrevSource ? prev.source : c.source,
+            morphAllowAutoCorrect: c.morphAllowAutoCorrect ?? prev.morphAllowAutoCorrect,
           });
         } else {
           prev.weightedDist = Math.min(prev.weightedDist, c.weightedDist);
           prev.rawDist = Math.min(prev.rawDist, c.rawDist);
-          if ((SOURCE_PRIORITY[c.source] || 0) > (SOURCE_PRIORITY[prev.source] || 0) && c.score >= prev.score - 0.03) {
+          if (
+            c.source === "deasciify" ||
+            ((SOURCE_PRIORITY[c.source] || 0) > (SOURCE_PRIORITY[prev.source] || 0) && c.score >= prev.score - 0.04)
+          ) {
             prev.source = c.source;
+          }
+          if (c.morphAllowAutoCorrect !== undefined && prev.morphAllowAutoCorrect === undefined) {
+            prev.morphAllowAutoCorrect = c.morphAllowAutoCorrect;
           }
         }
       }
@@ -1185,11 +1198,15 @@
       }
       if (!contextConflict) {
         if (top.source === "deasciify") {
-          allowAutoCorrect = trDeasciifyStatus === "unambiguous" && margin >= 0.03;
+          allowAutoCorrect = trDeasciifyStatus === "unambiguous" && margin >= 0.02;
         } else if (top.source === "morph") {
-          allowAutoCorrect = top.morphAllowAutoCorrect !== false && top.score >= 0.78 && margin >= 0.06;
+          const weakOrZeroCompetitor = !sameLangCompetitor || (sameLangCompetitor.freq || 0) === 0;
+          allowAutoCorrect =
+            top.morphAllowAutoCorrect !== false &&
+            top.score >= 0.78 &&
+            (margin >= 0.04 || (weakOrZeroCompetitor && margin >= 0.02));
         } else if (top.source === "exact_fold") {
-          allowAutoCorrect = top.score >= 0.80 && margin >= 0.08;
+          allowAutoCorrect = top.score >= 0.80 && margin >= 0.05;
         } else if (top.source === "edit") {
           const isHighFreqTransposition =
             top.weightedDist <= 0.50 &&
@@ -1197,13 +1214,20 @@
             top.score >= 0.90 &&
             (top.freq || 0) >= 650 &&
             (!sameLangCompetitor || (top.freq || 0) - (sameLangCompetitor.freq || 0) >= 50);
-          const minSameLangMargin = isHighFreqTransposition ? 0.035 : 0.08;
-          const minMargin = isHighFreqTransposition ? 0.035 : 0.05;
-          allowAutoCorrect =
-            top.weightedDist <= 1.10 &&
+          const isFreqDominant =
+            top.weightedDist <= 0.70 &&
             top.rawDist <= 2 &&
-            top.score >= 0.72 &&
-            (top.freq || 0) >= 350 &&
+            (top.freq || 0) >= 250 &&
+            (!sameLangCompetitor ||
+              (sameLangCompetitor.freq || 0) === 0 ||
+              (top.freq || 0) - (sameLangCompetitor.freq || 0) >= 120);
+          const minSameLangMargin = isFreqDominant ? 0.025 : isHighFreqTransposition ? 0.035 : 0.08;
+          const minMargin = isFreqDominant ? 0.025 : isHighFreqTransposition ? 0.035 : 0.05;
+          allowAutoCorrect =
+            top.weightedDist <= 1.15 &&
+            top.rawDist <= 2 &&
+            top.score >= 0.70 &&
+            (top.freq || 0) >= 250 &&
             sameLangMargin >= minSameLangMargin &&
             margin >= minMargin;
         }
