@@ -908,6 +908,17 @@ describe("M4 content.js Coordinator Integration", () => {
             }
             return;
           }
+          if (msg.type === "geminiInlineAction") {
+            if (cb) {
+              cb({
+                ok: true,
+                result: msg.actionId === "summarize" ? "Summary: we go to school." : "We go to school.",
+                mode: msg.actionId === "summarize" ? "modal" : "replace",
+                dialogTitle: "Fixed Text"
+              });
+            }
+            return;
+          }
           if (msg.type === "geminiSentenceSuggestions") {
             if (cb) {
               cb({
@@ -1095,8 +1106,14 @@ describe("M4 content.js Coordinator Integration", () => {
     const trigger = sr.querySelector('[data-role="sentence-trigger"]');
     assert.ok(trigger, "Floating sentence trigger button should appear at sentence end");
 
-    assert.equal(env.sentMessages.some((m) => m.type === "geminiSentenceSuggestions"), false);
+    // Clicking trigger opens action menu WITHOUT making any Gemini call yet
     trigger.click();
+    assert.equal(env.sentMessages.some((m) => m.type === "geminiSentenceSuggestions"), false);
+
+    // Click "3 Rewrite Options (AI)" to explicitly request 3 options
+    const opt3Btn = sr.querySelector('[data-inline-action="three-options"]');
+    assert.ok(opt3Btn, "3 Rewrite Options button should be shown");
+    opt3Btn.click();
 
     const calls = env.sentMessages.filter((m) => m.type === "geminiSentenceSuggestions");
     assert.equal(calls.length, 1);
@@ -1107,6 +1124,34 @@ describe("M4 content.js Coordinator Integration", () => {
     assert.equal(options.length, 2);
     options[0].click();
 
+    assert.equal(ta.value, "Intro stays. We go to school.");
+  });
+
+  it("executes single direct inline action (Fix Grammar) on click without requesting 3 options", async () => {
+    const env = bootContentEnvironment();
+    const ta = env.doc.createElement("textarea");
+    env.doc.body.appendChild(ta);
+    ta.focus();
+    ta.dispatchEvent(new env.MockEvent("focusin", { bubbles: true }));
+
+    ta.value = "Intro stays. We goes to school.";
+    ta.setSelectionRange(13, ta.value.length);
+    ta.dispatchEvent(new env.MockEvent("mouseup", { bubbles: true }));
+
+    await new Promise((r) => setTimeout(r, 60));
+    const sr = env.doc.getElementById("text-tools-shadow-host").shadowRoot;
+    const trigger = sr.querySelector('[data-role="sentence-trigger"]');
+    assert.ok(trigger);
+    trigger.click();
+
+    const fixBtn = sr.querySelector('[data-inline-action="fix"]');
+    assert.ok(fixBtn, "Direct Fix Grammar button must appear in inline menu");
+    fixBtn.click();
+
+    assert.equal(env.sentMessages.some((m) => m.type === "geminiSentenceSuggestions"), false);
+    const inlineCalls = env.sentMessages.filter((m) => m.type === "geminiInlineAction");
+    assert.equal(inlineCalls.length, 1);
+    assert.equal(inlineCalls[0].actionId, "fix");
     assert.equal(ta.value, "Intro stays. We go to school.");
   });
 

@@ -212,6 +212,39 @@ export async function handleRuntimeMessage(msg, sender) {
     return getLexicon(msg.lang);
   }
 
+  if (msg.type === "geminiInlineAction") {
+    const action = ACTIONS[msg.actionId];
+    if (!action) {
+      return { ok: false, error: `Unknown action: ${msg.actionId}` };
+    }
+    const settings = await getSettings();
+    if (!settings.apiKey) {
+      return {
+        ok: false,
+        error: "Please set your Gemini API key in Settings first.",
+        openOptions: true
+      };
+    }
+    try {
+      const result = await callGemini({
+        apiKey: settings.apiKey,
+        model: settings.model,
+        actionId: msg.actionId,
+        text: msg.text,
+        primaryLanguage: msg.primaryLang || settings.primaryLanguage,
+        secondaryLanguage: msg.secondaryLang || settings.secondaryLanguage
+      });
+      return {
+        ok: true,
+        result,
+        mode: action.mode,
+        dialogTitle: action.dialogTitle
+      };
+    } catch (err) {
+      return { ok: false, error: err?.message || String(err) };
+    }
+  }
+
   if (msg.type === "geminiSentenceSuggestions") {
     const settings = await getSettings();
     if (!settings.apiKey) {

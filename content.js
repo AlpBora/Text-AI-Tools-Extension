@@ -487,6 +487,70 @@
           flex-direction: column;
           gap: 6px;
         }
+        .action-grid {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 6px;
+        }
+        .action-btn {
+          background: #f9fafb;
+          color: #111827;
+          border: 1px solid #e5e7eb;
+          border-radius: 8px;
+          padding: 7px 10px;
+          font-size: 12px;
+          font-weight: 600;
+          cursor: pointer;
+          text-align: center;
+          transition: background 0.12s ease, border-color 0.12s ease;
+        }
+        .action-btn:hover {
+          background: #eef2ff;
+          border-color: #818cf8;
+          color: #312e81;
+        }
+        .action-btn-primary {
+          background: #4f46e5;
+          border-color: #4f46e5;
+          color: #ffffff;
+        }
+        .action-btn-primary:hover {
+          background: #4338ca;
+          border-color: #4338ca;
+          color: #ffffff;
+        }
+        .action-btn-secondary {
+          grid-column: 1 / -1;
+          background: #ffffff;
+          color: #4b5563;
+          border-style: dashed;
+          font-size: 11px;
+          padding: 5px 8px;
+        }
+        .inline-result-box {
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+          padding: 4px 2px;
+        }
+        .inline-result-text {
+          font-size: 13px;
+          line-height: 1.45;
+          color: #111827;
+          background: #f9fafb;
+          border: 1px solid #e5e7eb;
+          border-radius: 8px;
+          padding: 8px 10px;
+          white-space: pre-wrap;
+          max-height: 220px;
+          overflow-y: auto;
+          user-select: text;
+        }
+        .inline-result-actions {
+          display: flex;
+          justify-content: flex-end;
+          gap: 6px;
+        }
         .suggestion-option-btn {
           width: 100%;
           text-align: left;
@@ -1276,7 +1340,7 @@
     const menu = document.createElement("div");
     menu.className = "popover suggestion-menu";
     menu.setAttribute("role", "menu");
-    menu.setAttribute("aria-label", "AI Sentence Suggestions");
+    menu.setAttribute("aria-label", "AI Actions");
 
     const pos = clampPosition(anchorPos.left, anchorPos.top + 32, 330, 220);
     menu.style.left = `${pos.left}px`;
@@ -1288,7 +1352,7 @@
     const title = document.createElement("div");
     title.className = "popover-title";
     const labelSpan = document.createElement("span");
-    labelSpan.textContent = "AI Suggestions";
+    labelSpan.textContent = "Text AI Tools";
     const modeBadge = document.createElement("span");
     modeBadge.className = "badge";
     modeBadge.textContent = extraction.mode === "selection" ? "Selection" : "Sentence";
@@ -1307,94 +1371,236 @@
     header.appendChild(closeBtn);
     menu.appendChild(header);
 
-    const list = document.createElement("div");
-    list.className = "suggestion-list";
-
-    const status = document.createElement("div");
-    status.className = "inline-status";
-    const sp = document.createElement("div");
-    sp.className = "spinner-dark";
-    const stTxt = document.createElement("span");
-    stTxt.textContent = "Getting grammar & fluency options...";
-    status.appendChild(sp);
-    status.appendChild(stTxt);
-    list.appendChild(status);
-
-    menu.appendChild(list);
+    const bodyContainer = document.createElement("div");
+    bodyContainer.className = "suggestion-list";
+    menu.appendChild(bodyContainer);
     slot.appendChild(menu);
 
-    chrome.runtime.sendMessage(
-      {
-        type: "geminiSentenceSuggestions",
-        text: extraction.text,
-        mode: extraction.mode,
-        primaryLang: settings.primaryLanguage,
-        secondaryLang: settings.secondaryLanguage
-      },
-      (res) => {
-        if (activeMenuMode !== "suggestions") return;
-        list.innerHTML = "";
-        if (chrome.runtime?.lastError || !res || !res.ok) {
-          const errBox = document.createElement("div");
-          errBox.className = "inline-error";
-          const msg = document.createElement("span");
-          msg.textContent =
-            res?.error || chrome.runtime?.lastError?.message || "Failed to fetch suggestions.";
-          errBox.appendChild(msg);
-          if (res?.openOptions) {
-            const optBtn = document.createElement("button");
-            optBtn.type = "button";
-            optBtn.className = "inline-settings-btn";
-            optBtn.textContent = "Open Settings";
-            preventBlurOnMouseDown(optBtn);
-            optBtn.addEventListener("click", () => chrome.runtime.sendMessage({ type: "openOptions" }));
-            errBox.appendChild(optBtn);
-          }
-          list.appendChild(errBox);
-          return;
+    const isEditableTarget = Boolean(editor && extraction.rangeSnapshot?.kind !== "readonly");
+
+    const renderError = (errMsg, openOptions) => {
+      bodyContainer.innerHTML = "";
+      const errBox = document.createElement("div");
+      errBox.className = "inline-error";
+      const msg = document.createElement("span");
+      msg.textContent = errMsg;
+      errBox.appendChild(msg);
+      if (openOptions) {
+        const optBtn = document.createElement("button");
+        optBtn.type = "button";
+        optBtn.className = "inline-settings-btn";
+        optBtn.textContent = "Open Settings";
+        preventBlurOnMouseDown(optBtn);
+        optBtn.addEventListener("click", () => chrome.runtime.sendMessage({ type: "openOptions" }));
+        errBox.appendChild(optBtn);
+      }
+      bodyContainer.appendChild(errBox);
+    };
+
+    const renderLoading = (label) => {
+      bodyContainer.innerHTML = "";
+      const status = document.createElement("div");
+      status.className = "inline-status";
+      const sp = document.createElement("div");
+      sp.className = "spinner-dark";
+      const stTxt = document.createElement("span");
+      stTxt.textContent = label;
+      status.appendChild(sp);
+      status.appendChild(stTxt);
+      bodyContainer.appendChild(status);
+    };
+
+    const applyAndRecordUndo = (newText) => {
+      const origText = extraction.text;
+      const ok = applyExtensionReplacement(editor, extraction.rangeSnapshot, newText);
+      closeFloatingMenu();
+      if (ok) {
+        if (UndoManager && typeof extraction.start === "number") {
+          const newEnd = extraction.start + newText.length;
+          const undoId = UndoManager.recordAutoCorrect({
+            targetRef: editor,
+            start: extraction.start,
+            end: newEnd,
+            originalWord: origText,
+            correctedWord: newText
+          });
+          activeUndoState = {
+            editor,
+            undoId,
+            start: extraction.start,
+            end: newEnd,
+            originalWord: origText,
+            correctedWord: newText,
+            boundaryChar: ""
+          };
         }
+        clearUncertainState({ keepMenuIfSuggestion: false });
+        scheduleFloatingTriggerUpdate();
+      }
+      return ok;
+    };
 
-        for (const opt of res.options || []) {
-          const optBtn = document.createElement("button");
-          optBtn.type = "button";
-          optBtn.className = "suggestion-option-btn";
-          optBtn.setAttribute("role", "menuitem");
-          optBtn.setAttribute("data-category", opt.category || "grammar");
-
-          const optHeader = document.createElement("div");
-          optHeader.className = "opt-header";
-          const badge = document.createElement("span");
-          badge.className = "opt-badge";
-          badge.textContent = opt.label || opt.category || "Option";
-          optHeader.appendChild(badge);
-          optBtn.appendChild(optHeader);
-
-          const textEl = document.createElement("span");
-          textEl.className = "opt-text";
-          textEl.textContent = opt.text;
-          optBtn.appendChild(textEl);
-
-          if (opt.explanation) {
-            const desc = document.createElement("span");
-            desc.className = "opt-desc";
-            desc.textContent = opt.explanation;
-            optBtn.appendChild(desc);
+    const runSingleAction = (actionId, label) => {
+      renderLoading(`Running ${label}...`);
+      chrome.runtime.sendMessage(
+        {
+          type: "geminiInlineAction",
+          actionId,
+          text: extraction.text,
+          primaryLang: settings.primaryLanguage,
+          secondaryLang: settings.secondaryLanguage
+        },
+        (res) => {
+          if (activeMenuMode !== "suggestions") return;
+          if (chrome.runtime?.lastError || !res || !res.ok) {
+            renderError(
+              res?.error || chrome.runtime?.lastError?.message || "Gemini request failed.",
+              res?.openOptions
+            );
+            return;
           }
 
-          preventBlurOnMouseDown(optBtn);
-          optBtn.addEventListener("click", () => {
-            const ok = applyExtensionReplacement(editor, extraction.rangeSnapshot, opt.text);
-            closeFloatingMenu();
-            if (ok) {
-              clearUncertainState({ keepMenuIfSuggestion: false });
-              scheduleFloatingTriggerUpdate();
+          const outText = String(res.result || "").trim();
+          if (res.mode === "replace" && isEditableTarget) {
+            const applied = applyAndRecordUndo(outText);
+            if (applied) return;
+          }
+
+          bodyContainer.innerHTML = "";
+          const box = document.createElement("div");
+          box.className = "inline-result-box";
+          const txt = document.createElement("div");
+          txt.className = "inline-result-text";
+          txt.textContent = outText;
+          box.appendChild(txt);
+
+          const actionsRow = document.createElement("div");
+          actionsRow.className = "inline-result-actions";
+          if (isEditableTarget) {
+            const replaceBtn = document.createElement("button");
+            replaceBtn.type = "button";
+            replaceBtn.className = "action-btn action-btn-primary";
+            replaceBtn.textContent = "Apply";
+            preventBlurOnMouseDown(replaceBtn);
+            replaceBtn.addEventListener("click", () => applyAndRecordUndo(outText));
+            actionsRow.appendChild(replaceBtn);
+          }
+          const copyBtn = document.createElement("button");
+          copyBtn.type = "button";
+          copyBtn.className = "action-btn";
+          copyBtn.textContent = "Copy";
+          preventBlurOnMouseDown(copyBtn);
+          copyBtn.addEventListener("click", async () => {
+            const copied = await copyText(outText);
+            if (copied) {
+              copyBtn.textContent = "Copied ✓";
+              setTimeout(closeFloatingMenu, 500);
             }
           });
-
-          list.appendChild(optBtn);
+          actionsRow.appendChild(copyBtn);
+          box.appendChild(actionsRow);
+          bodyContainer.appendChild(box);
         }
-      }
-    );
+      );
+    };
+
+    const runThreeOptions = () => {
+      renderLoading("Getting 3 options...");
+      chrome.runtime.sendMessage(
+        {
+          type: "geminiSentenceSuggestions",
+          text: extraction.text,
+          mode: extraction.mode,
+          primaryLang: settings.primaryLanguage,
+          secondaryLang: settings.secondaryLanguage
+        },
+        (res) => {
+          if (activeMenuMode !== "suggestions") return;
+          bodyContainer.innerHTML = "";
+          if (chrome.runtime?.lastError || !res || !res.ok) {
+            renderError(
+              res?.error || chrome.runtime?.lastError?.message || "Failed to fetch suggestions.",
+              res?.openOptions
+            );
+            return;
+          }
+
+          for (const opt of res.options || []) {
+            const optBtn = document.createElement("button");
+            optBtn.type = "button";
+            optBtn.className = "suggestion-option-btn";
+            optBtn.setAttribute("role", "menuitem");
+            optBtn.setAttribute("data-category", opt.category || "grammar");
+
+            const optHeader = document.createElement("div");
+            optHeader.className = "opt-header";
+            const badge = document.createElement("span");
+            badge.className = "opt-badge";
+            badge.textContent = opt.label || opt.category || "Option";
+            optHeader.appendChild(badge);
+            optBtn.appendChild(optHeader);
+
+            const textEl = document.createElement("span");
+            textEl.className = "opt-text";
+            textEl.textContent = opt.text;
+            optBtn.appendChild(textEl);
+
+            if (opt.explanation) {
+              const desc = document.createElement("span");
+              desc.className = "opt-desc";
+              desc.textContent = opt.explanation;
+              optBtn.appendChild(desc);
+            }
+
+            preventBlurOnMouseDown(optBtn);
+            optBtn.addEventListener("click", () => applyAndRecordUndo(opt.text));
+            bodyContainer.appendChild(optBtn);
+          }
+        }
+      );
+    };
+
+    // Render direct action choices immediately (ZERO Gemini calls until clicked!)
+    const grid = document.createElement("div");
+    grid.className = "action-grid";
+
+    const actionsToShow = isEditableTarget
+      ? [
+          { id: "fix", label: "Fix Grammar", primary: true },
+          { id: "professional", label: "Professional", primary: false },
+          { id: "translate", label: "Translate", primary: false },
+          { id: "summarize", label: "Summarize", primary: false }
+        ]
+      : [
+          { id: "translate", label: "Translate", primary: true },
+          { id: "summarize", label: "Summarize", primary: false }
+        ];
+
+    for (const act of actionsToShow) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = act.primary ? "action-btn action-btn-primary" : "action-btn";
+      b.setAttribute("role", "menuitem");
+      b.setAttribute("data-inline-action", act.id);
+      b.textContent = act.label;
+      preventBlurOnMouseDown(b);
+      b.addEventListener("click", () => runSingleAction(act.id, act.label));
+      grid.appendChild(b);
+    }
+
+    if (isEditableTarget) {
+      const opt3Btn = document.createElement("button");
+      opt3Btn.type = "button";
+      opt3Btn.className = "action-btn action-btn-secondary";
+      opt3Btn.setAttribute("role", "menuitem");
+      opt3Btn.setAttribute("data-inline-action", "three-options");
+      opt3Btn.textContent = "3 Rewrite Options (AI)";
+      preventBlurOnMouseDown(opt3Btn);
+      opt3Btn.addEventListener("click", runThreeOptions);
+      grid.appendChild(opt3Btn);
+    }
+
+    bodyContainer.appendChild(grid);
   }
 
   function updateFloatingTriggerNow() {
@@ -1403,24 +1609,26 @@
       (activeEditor && DomEditor.isEligibleEditor(activeEditor) && activeEditor) ||
       DomEditor.resolveEditableTarget(document.activeElement);
 
-    if (!editor || (document.activeElement && !editor.contains(document.activeElement) && document.activeElement !== editor)) {
+    if (editor && (!document.activeElement || editor.contains(document.activeElement) || document.activeElement === editor)) {
+      const extracted = DomEditor.extractSentenceOrSelection(editor);
+      if (extracted) {
+        if (extracted.mode === "selection") {
+          showFloatingTrigger(editor, extracted);
+          return;
+        }
+        if (extracted.mode === "sentence" && DomEditor.isCaretAtSentenceEnd(editor)) {
+          showFloatingTrigger(editor, extracted);
+          return;
+        }
+      }
       hideFloatingTrigger();
       return;
     }
 
-    const extracted = DomEditor.extractSentenceOrSelection(editor);
-    if (!extracted) {
-      hideFloatingTrigger();
-      return;
-    }
-
-    if (extracted.mode === "selection") {
-      showFloatingTrigger(editor, extracted);
-      return;
-    }
-
-    if (extracted.mode === "sentence" && DomEditor.isCaretAtSentenceEnd(editor)) {
-      showFloatingTrigger(editor, extracted);
+    // Read-only webpage selection support (Translate / Summarize anywhere)
+    const roExtracted = DomEditor.extractSentenceOrSelection(null);
+    if (roExtracted && roExtracted.mode === "selection" && roExtracted.text.trim().length > 0) {
+      showFloatingTrigger(null, roExtracted);
       return;
     }
 
