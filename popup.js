@@ -129,8 +129,11 @@ function initPopup() {
   openShortcutsBtn?.addEventListener("click", async () => {
     const url = getShortcutsUrl();
     try {
-      const tab = await chrome.tabs.create({ url });
-      if (tab) return;
+      const tab = await chrome.tabs.create({ url, active: true });
+      if (tab?.id && !chrome.runtime?.lastError) {
+        window.close();
+        return;
+      }
     } catch {
       // Some Chromium browsers disallow programmatic navigation to chrome:// URLs
     }
