@@ -8,6 +8,18 @@ Works with **any AI provider / model** (bring your own API key or local model) i
 
 ---
 
+## Screenshots
+
+| Browser Selection Menu | macOS Floating Menu (`Right ⌘ + .`) |
+| :---: | :---: |
+| ![Browser Selection Menu](assets/screenshot-browser-selection.jpg) | ![macOS Floating Menu](assets/screenshot-macos-menu.jpg) |
+
+| Extension Popup | Settings (Multi-Provider) |
+| :---: | :---: |
+| ![Extension Popup](assets/screenshot-popup.jpg) | ![Extension Settings](assets/screenshot-settings.jpg) |
+
+---
+
 ## 1. Browser Extension (Chromium & Orion)
 
 1. Clone or download this repository.
