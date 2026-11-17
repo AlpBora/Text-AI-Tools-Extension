@@ -200,63 +200,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func makeHandPenMenuBarImage() -> NSImage {
-        let size = NSSize(width: 20, height: 18)
+        let size = NSSize(width: 18, height: 18)
         let img = NSImage(size: size, flipped: false) { _ in
             NSColor.labelColor.setStroke()
             NSColor.labelColor.setFill()
 
-            // Pen angled down-left
-            let pen = NSBezierPath()
-            pen.lineWidth = 1.4
-            pen.lineCapStyle = .round
-            pen.lineJoinStyle = .round
-            pen.move(to: NSPoint(x: 3.4, y: 4.5))
-            pen.line(to: NSPoint(x: 5.1, y: 5.5))
-            pen.line(to: NSPoint(x: 9.8, y: 14.3))
-            pen.line(to: NSPoint(x: 8.3, y: 15.1))
-            pen.line(to: NSPoint(x: 3.6, y: 6.3))
-            pen.close()
-            pen.stroke()
+            // Top paper sheet
+            let paper = NSBezierPath(roundedRect: NSRect(x: 4.5, y: 11.2, width: 9.0, height: 4.8), xRadius: 0.8, yRadius: 0.8)
+            paper.lineWidth = 1.3
+            paper.stroke()
 
-            // Hand + wrist cuff on the right
-            let hand = NSBezierPath()
-            hand.lineWidth = 1.4
-            hand.lineCapStyle = .round
-            hand.lineJoinStyle = .round
-            // Upper hand curve to cuff
-            hand.move(to: NSPoint(x: 9.3, y: 13.0))
-            hand.curve(to: NSPoint(x: 15.2, y: 11.8),
-                       controlPoint1: NSPoint(x: 11.4, y: 12.6),
-                       controlPoint2: NSPoint(x: 13.4, y: 11.8))
-            // Lower palm & thumb grip
-            hand.move(to: NSPoint(x: 4.9, y: 7.4))
-            hand.curve(to: NSPoint(x: 9.8, y: 8.4),
-                       controlPoint1: NSPoint(x: 6.4, y: 8.2),
-                       controlPoint2: NSPoint(x: 8.2, y: 8.4))
-            hand.move(to: NSPoint(x: 5.6, y: 6.2))
-            hand.curve(to: NSPoint(x: 15.2, y: 7.4),
-                       controlPoint1: NSPoint(x: 8.8, y: 5.6),
-                       controlPoint2: NSPoint(x: 12.6, y: 7.4))
-            // Cuff rectangle
-            hand.move(to: NSPoint(x: 15.2, y: 6.6))
-            hand.line(to: NSPoint(x: 17.6, y: 6.6))
-            hand.line(to: NSPoint(x: 17.6, y: 12.6))
-            hand.line(to: NSPoint(x: 15.2, y: 12.6))
-            hand.close()
-            hand.stroke()
+            // Typewriter carriage bar
+            let carriage = NSBezierPath()
+            carriage.lineWidth = 1.4
+            carriage.lineCapStyle = .round
+            carriage.move(to: NSPoint(x: 2.0, y: 11.2))
+            carriage.line(to: NSPoint(x: 16.0, y: 11.2))
+            carriage.stroke()
 
-            // Wavy line underneath
-            let wave = NSBezierPath()
-            wave.lineWidth = 1.4
-            wave.lineCapStyle = .round
-            wave.move(to: NSPoint(x: 2.4, y: 2.3))
-            wave.curve(to: NSPoint(x: 6.2, y: 2.3),
-                       controlPoint1: NSPoint(x: 3.6, y: 1.1),
-                       controlPoint2: NSPoint(x: 5.0, y: 3.5))
-            wave.curve(to: NSPoint(x: 10.0, y: 2.3),
-                       controlPoint1: NSPoint(x: 7.4, y: 1.1),
-                       controlPoint2: NSPoint(x: 8.8, y: 3.5))
-            wave.stroke()
+            // Typewriter body
+            let body = NSBezierPath(roundedRect: NSRect(x: 2.6, y: 2.4, width: 12.8, height: 7.4), xRadius: 2.0, yRadius: 2.0)
+            body.lineWidth = 1.4
+            body.stroke()
+
+            // Minimalist key dots + spacebar
+            for kx in stride(from: 4.8, through: 13.2, by: 2.8) {
+                NSBezierPath(ovalIn: NSRect(x: kx - 0.65, y: 6.4, width: 1.3, height: 1.3)).fill()
+            }
+            let spacebar = NSBezierPath(roundedRect: NSRect(x: 5.5, y: 3.8, width: 7.0, height: 1.2), xRadius: 0.6, yRadius: 0.6)
+            spacebar.fill()
             return true
         }
         img.isTemplate = true
