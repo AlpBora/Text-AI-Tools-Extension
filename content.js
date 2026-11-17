@@ -13,6 +13,7 @@
   const DomEditor = Tools.DomEditor;
   const SpellcheckEngine = Tools.SpellcheckEngine;
   const LanguageRegistry = Tools.LanguageRegistry;
+  const PersonalModel = Tools.PersonalModel;
   const UndoManager = Tools.UndoManager;
 
   const HOST_ID = "text-tools-shadow-host";
@@ -46,8 +47,19 @@
   const userHabits = {
     corrections: Object.create(null),
     wordCounts: Object.create(null),
-    ignored: Object.create(null)
+    ignored: Object.create(null),
+    bigrams: Object.create(null),
+    domainCounts: Object.create(null),
+    charEdits: Object.create(null)
   };
+
+  function getCurrentDomain() {
+    try {
+      return String(window.location?.hostname || "").trim().toLowerCase();
+    } catch {
+      return "";
+    }
+  }
 
   function trLowerHabit(str) {
     return String(str || "")
@@ -66,27 +78,36 @@
       habitSaveTimer = null;
       try {
         if (!chrome?.storage?.local) return;
-        chrome.storage.local.set({
-          userHabits: {
-            corrections: { ...userHabits.corrections },
-            wordCounts: { ...userHabits.wordCounts },
-            ignored: { ...userHabits.ignored }
-          }
-        });
+        const payload = PersonalModel
+          ? PersonalModel.pruneHabits(userHabits)
+          : {
+              corrections: { ...userHabits.corrections },
+              wordCounts: { ...userHabits.wordCounts },
+              ignored: { ...userHabits.ignored },
+              bigrams: { ...userHabits.bigrams },
+              domainCounts: { ...userHabits.domainCounts },
+              charEdits: { ...userHabits.charEdits }
+            };
+        chrome.storage.local.set({ userHabits: payload });
       } catch {
         // Ignore storage write errors
       }
     }, 400);
   }
 
-  function recordHabitWordUsage(word) {
+  function recordHabitWordUsage(word, prevWord) {
     const k = trLowerHabit(word);
     if (!k || k.length < 2) return;
     userHabits.wordCounts[k] = (Number(userHabits.wordCounts[k]) || 0) + 1;
+    if (PersonalModel) {
+      if (prevWord) PersonalModel.recordBigram(userHabits, prevWord, k, 1);
+      const dom = getCurrentDomain();
+      if (dom) PersonalModel.recordDomainWord(userHabits, dom, k, 1);
+    }
     saveUserHabitsDebounced();
   }
 
-  function recordHabitCorrection(origWord, targetWord, weight = 1) {
+  function recordHabitCorrection(origWord, targetWord, weight = 1, prevWord = "") {
     const o = trLowerHabit(origWord);
     const t = trLowerHabit(targetWord);
     if (!o || !t || o === t) return;
@@ -95,6 +116,12 @@
     }
     userHabits.corrections[o][t] = (Number(userHabits.corrections[o][t]) || 0) + weight;
     userHabits.wordCounts[t] = (Number(userHabits.wordCounts[t]) || 0) + weight;
+    if (PersonalModel) {
+      PersonalModel.learnCharEdits(userHabits, o, t, weight);
+      if (prevWord) PersonalModel.recordBigram(userHabits, prevWord, t, weight);
+      const dom = getCurrentDomain();
+      if (dom) PersonalModel.recordDomainWord(userHabits, dom, t, weight);
+    }
     if (userHabits.ignored[o]) {
       delete userHabits.ignored[o];
     }
@@ -109,6 +136,9 @@
       const t = trLowerHabit(correctedWord);
       if (userHabits.corrections[o] && userHabits.corrections[o][t]) {
         userHabits.corrections[o][t] = Math.max(0, Number(userHabits.corrections[o][t]) - 1);
+      }
+      if (PersonalModel) {
+        PersonalModel.learnCharEdits(userHabits, o, t, -1);
       }
     }
     saveUserHabitsDebounced();
@@ -143,6 +173,15 @@
             }
             if (data.userHabits.ignored && typeof data.userHabits.ignored === "object") {
               Object.assign(userHabits.ignored, data.userHabits.ignored);
+            }
+            if (data.userHabits.bigrams && typeof data.userHabits.bigrams === "object") {
+              Object.assign(userHabits.bigrams, data.userHabits.bigrams);
+            }
+            if (data.userHabits.domainCounts && typeof data.userHabits.domainCounts === "object") {
+              Object.assign(userHabits.domainCounts, data.userHabits.domainCounts);
+            }
+            if (data.userHabits.charEdits && typeof data.userHabits.charEdits === "object") {
+              Object.assign(userHabits.charEdits, data.userHabits.charEdits);
             }
           }
         }
@@ -1082,7 +1121,7 @@
     const applyCandidate = (newWord) => {
       const ok = applyExtensionReplacement(uncertainState.editor, uncertainState.span, newWord);
       if (ok) {
-        recordHabitCorrection(uncertainState.word, newWord, 2);
+        recordHabitCorrection(uncertainState.word, newWord, 2, uncertainState.prevWord || "");
         clearUncertainState();
         scheduleFloatingTriggerUpdate();
       }
@@ -1407,6 +1446,12 @@
         ? String(editor.type || editor.getAttribute("type") || "text").toLowerCase()
         : "";
 
+    const prevWord =
+      Array.isArray(extracted.contextTokens) && extracted.contextTokens.length > 0
+        ? extracted.contextTokens[extracted.contextTokens.length - 1]
+        : "";
+    const domain = getCurrentDomain();
+
     const result = SpellcheckEngine.checkWord({
       word: extracted.word,
       contextTokens: extracted.contextTokens,
@@ -1415,7 +1460,7 @@
       lexiconsByLang,
       autoCorrectEnabled: settings.autoCorrectEnabled,
       userHabits,
-      context: { inputType }
+      context: { inputType, domain }
     });
 
     if (!result || result.decision === "skip") {
@@ -1423,14 +1468,18 @@
     }
 
     if (result.decision === "valid") {
-      recordHabitWordUsage(extracted.word);
+      recordHabitWordUsage(extracted.word, prevWord);
       return;
     }
 
     if (result.decision === "auto_correct" && result.replacement && result.replacement !== extracted.word) {
       const ok = applyExtensionReplacement(editor, extracted.rangeSnapshot, result.replacement);
       if (ok && UndoManager) {
-        recordHabitWordUsage(result.replacement);
+        recordHabitWordUsage(result.replacement, prevWord);
+        if (PersonalModel) {
+          PersonalModel.learnCharEdits(userHabits, extracted.word, result.replacement, 0.5);
+          saveUserHabitsDebounced();
+        }
         const newEnd = extracted.start + result.replacement.length;
         const undoId = UndoManager.recordAutoCorrect({
           targetRef: editor,
@@ -1482,7 +1531,8 @@
         word: extracted.word,
         span,
         candidates: result.candidates || [],
-        sentence: sentenceText
+        sentence: sentenceText,
+        prevWord
       });
     }
   }

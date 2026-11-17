@@ -158,6 +158,7 @@ describe("M3 manifest.json & UI contracts", () => {
       "content/language-registry.js",
       "content/morphology-tr.js",
       "content/deasciifier-tr.js",
+      "content/personal-model.js",
       "content/spellcheck-engine.js",
       "content/undo-manager.js",
       "content/dom-editor.js",

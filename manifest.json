@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Text AI Tools",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Offline word-end spellchecking with Turkish morphology & bilingual matching, plus optional Gemini grammar, fluency, translation, and summarization tools.",
   "permissions": [
     "contextMenus",
@@ -41,6 +41,7 @@
         "content/language-registry.js",
         "content/morphology-tr.js",
         "content/deasciifier-tr.js",
+        "content/personal-model.js",
         "content/spellcheck-engine.js",
         "content/undo-manager.js",
         "content/dom-editor.js",

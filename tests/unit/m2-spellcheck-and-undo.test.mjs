@@ -19,6 +19,7 @@ const LanguageRegistry = require(path.join(ROOT_DIR, "content/language-registry.
 const TurkishMorphology = require(path.join(ROOT_DIR, "content/morphology-tr.js"));
 const TurkishDeasciifier = require(path.join(ROOT_DIR, "content/deasciifier-tr.js"));
 const SpellcheckEngine = require(path.join(ROOT_DIR, "content/spellcheck-engine.js"));
+const PersonalModel = require(path.join(ROOT_DIR, "content/personal-model.js"));
 const UndoManager = require(path.join(ROOT_DIR, "content/undo-manager.js"));
 
 const LEXICONS = { tr: trLexicon, en: enLexicon };
@@ -419,6 +420,36 @@ describe("M2: Turkish Morphology, Deasciifier, Homographs & Ambiguity Integratio
       userHabits: { ignored: { uyuyom: 2 } },
     });
     assert.equal(ignoredRes.decision, "valid");
+  });
+
+  it("PersonalModel generalizes charEdits to unseen words and uses bigram + domain context", () => {
+    const habits = {};
+    // User repeatedly omits 'r' in one word -> learns del:r pattern
+    PersonalModel.learnCharEdits(habits, "bikas", "birkaş", 3);
+    PersonalModel.learnCharEdits(habits, "fakat", "farkat", 3);
+    assert.ok(habits.charEdits["del:r"] >= 3, "Expected del:r edit pattern to be learned");
+
+    // Generalizes to an unseen word where 'r' was omitted ("yain" -> "yarın")
+    const bonusYarin = PersonalModel.scoreCharHabit("yain", "yarın", habits);
+    const bonusYakin = PersonalModel.scoreCharHabit("yain", "yakın", habits);
+    assert.ok(bonusYarin > bonusYakin, "Learned del:r should generalize to unseen word 'yain' -> 'yarın'");
+
+    // Bigram + domain disambiguation on ambiguous "soyle"
+    PersonalModel.recordBigram(habits, "yarın", "şöyle", 4);
+    PersonalModel.recordDomainWord(habits, "mail.google.com", "şöyle", 4);
+
+    const ctxRes = SpellcheckEngine.checkWord({
+      word: "soyle",
+      contextTokens: ["yarın"],
+      primaryLang: "tr",
+      secondaryLang: "en",
+      lexiconsByLang: LEXICONS,
+      autoCorrectEnabled: true,
+      userHabits: habits,
+      context: { domain: "mail.google.com" },
+    });
+    assert.equal(ctxRes.decision, "auto_correct");
+    assert.equal(ctxRes.replacement, "şöyle");
   });
 });
 

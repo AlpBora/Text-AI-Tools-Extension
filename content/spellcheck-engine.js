@@ -954,6 +954,7 @@
     const registry = resolveDep("LanguageRegistry", "./language-registry.js");
     const morph = resolveDep("TurkishMorphology", "./morphology-tr.js");
     const deasciifier = resolveDep("TurkishDeasciifier", "./deasciifier-tr.js");
+    const personalModel = resolveDep("PersonalModel", "./personal-model.js");
 
     const normalize = registry ? registry.normalizeLang : (s) => String(s || "").trim().toLowerCase();
     const getProfile = registry
@@ -1003,6 +1004,9 @@
     }
 
     const contextSlice = Array.isArray(opts.contextTokens) ? opts.contextTokens.slice(-12) : opts.contextTokens || [];
+    const prevContextToken =
+      Array.isArray(contextSlice) && contextSlice.length > 0 ? contextSlice[contextSlice.length - 1] : "";
+    const domain = String(opts.context?.domain || opts.domain || "").trim().toLowerCase();
 
     const guess = registry
       ? registry.detectContextLanguage(contextSlice, primaryId, secondaryId, normLexicons)
@@ -1159,15 +1163,29 @@
           langBias = 0.025;
         }
         let habitBonus = 0;
-        if (userHabits && userHabits.wordCounts) {
-          const uCount = Number(userHabits.wordCounts[c.lowerWord]) || 0;
-          if (uCount > 0) {
-            habitBonus = Math.min(0.10, Math.log2(uCount + 1) * 0.035);
+        if (userHabits) {
+          if (userHabits.wordCounts) {
+            const uCount = Number(userHabits.wordCounts[c.lowerWord]) || 0;
+            if (uCount > 0) {
+              habitBonus += Math.min(0.10, Math.log2(uCount + 1) * 0.035);
+            }
+          }
+          if (personalModel) {
+            if (prevContextToken) {
+              habitBonus += personalModel.scoreBigram(prevContextToken, c.lowerWord, userHabits);
+            }
+            if (domain) {
+              habitBonus += personalModel.scoreDomain(domain, c.lowerWord, userHabits);
+            }
+            if (c.source === "edit" || c.source === "morph" || c.source === "phonetic" || c.source === "deasciify") {
+              habitBonus += personalModel.scoreCharHabit(cleanWord, c.lowerWord, userHabits);
+            }
           }
         }
         const baseClamped = Math.max(0.01, Math.min(0.995, c.score + langBias));
         allCandidates.push({
           ...c,
+          habitBonus,
           score: Number((baseClamped + habitBonus).toFixed(4)),
         });
       }
@@ -1296,7 +1314,12 @@
       if (!contextConflict) {
         const topUserCount = Number(userHabits?.wordCounts?.[top.lowerWord]) || 0;
         const secondUserCount = second ? Number(userHabits?.wordCounts?.[second.lowerWord]) || 0 : 0;
-        const userHabitTieBreaker = topUserCount >= 1 && topUserCount > secondUserCount && margin >= 0.02;
+        const topPersonalScore = top.habitBonus || 0;
+        const secondPersonalScore = second?.habitBonus || 0;
+        const userHabitTieBreaker =
+          ((topUserCount >= 1 && topUserCount > secondUserCount) ||
+            (topPersonalScore >= 0.04 && topPersonalScore > secondPersonalScore + 0.02)) &&
+          margin >= 0.02;
 
         if (top.source === "user_habit" || top.source === "colloquial") {
           allowAutoCorrect = margin >= 0.005;
