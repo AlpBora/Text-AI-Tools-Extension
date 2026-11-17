@@ -118,6 +118,7 @@ final class WorkerBridge {
     private var nextId: Int = 1
     private var stdoutBuffer = Data()
     private let rootDir: String
+    private(set) var startedAt = Date()
 
     init(rootDir: String) {
         self.rootDir = rootDir
@@ -169,6 +170,7 @@ final class WorkerBridge {
             try proc.run()
             self.process = proc
             self.stdinHandle = inPipe.fileHandleForWriting
+            self.startedAt = Date()
         } catch {
             NSLog("TextAIToolsMac: failed to launch node worker: %@", error.localizedDescription)
         }
@@ -226,9 +228,19 @@ final class WorkerBridge {
     }
 
     func stop() {
+        process?.terminationHandler = nil
         process?.terminate()
         process = nil
         stdinHandle = nil
+    }
+
+    func restart() {
+        stop()
+        lock.lock()
+        stdoutBuffer.removeAll()
+        pendingCallbacks.removeAll()
+        lock.unlock()
+        start()
     }
 }
 
@@ -271,7 +283,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var skipBrowsersItem: NSMenuItem!
     private var statusMenuItem: NSMenuItem!
     private var hotkeyMenuItem: NSMenuItem!
+    private var autoUpdateItem: NSMenuItem!
     private var retryTimer: Timer?
+    private var updateTimer: Timer?
+    private var rootDir = ""
+    private var isUpdating = false
+    private var autoUpdateEnabled: Bool = {
+        if UserDefaults.standard.object(forKey: "autoUpdateEnabled") == nil { return true }
+        return UserDefaults.standard.bool(forKey: "autoUpdateEnabled")
+    }()
     private var actionPanel: InlineActionPanel?
     private var savedFrontApp: NSRunningApplication?
 
@@ -290,12 +310,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         let rootDir = (Bundle.main.object(forInfoDictionaryKey: "TextAIToolsRootDir") as? String)
             ?? FileManager.default.currentDirectoryPath
+        self.rootDir = rootDir
         worker = WorkerBridge(rootDir: rootDir)
 
         setupMenuBar()
         loadSavedHotkey()
         requestAccessibilityIfNeeded()
         startEventTap()
+        startAutoUpdateLoop()
         if eventTap == nil {
             retryTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
                 guard let self = self else { return }
@@ -374,6 +396,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(NSMenuItem(title: "Set Gemini API Key…", action: #selector(promptApiKey), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "Check / Retry Permissions", action: #selector(checkAccessibility), keyEquivalent: ""))
         menu.addItem(NSMenuItem.separator())
+        autoUpdateItem = NSMenuItem(title: "Auto-Update in Background", action: #selector(toggleAutoUpdate), keyEquivalent: "")
+        autoUpdateItem.state = autoUpdateEnabled ? .on : .off
+        menu.addItem(autoUpdateItem)
+        menu.addItem(NSMenuItem(title: "Check for Updates / Rebuild Now", action: #selector(manualCheckForUpdates), keyEquivalent: ""))
+        menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(quitApp), keyEquivalent: "q"))
 
         statusItem.menu = menu
@@ -447,7 +474,170 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func quitApp() {
+        updateTimer?.invalidate()
+        updateTimer = nil
         NSApp.terminate(nil)
+    }
+
+    @objc private func toggleAutoUpdate() {
+        autoUpdateEnabled.toggle()
+        UserDefaults.standard.set(autoUpdateEnabled, forKey: "autoUpdateEnabled")
+        autoUpdateItem.state = autoUpdateEnabled ? .on : .off
+        if autoUpdateEnabled {
+            startAutoUpdateLoop()
+        } else {
+            updateTimer?.invalidate()
+            updateTimer = nil
+        }
+    }
+
+    @objc private func manualCheckForUpdates() {
+        checkForUpdates(manual: true)
+    }
+
+    private func startAutoUpdateLoop() {
+        updateTimer?.invalidate()
+        updateTimer = nil
+        guard autoUpdateEnabled else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 15.0) { [weak self] in
+            guard let self = self, self.autoUpdateEnabled else { return }
+            self.checkForUpdates(manual: false)
+        }
+        updateTimer = Timer.scheduledTimer(withTimeInterval: 60.0, repeats: true) { [weak self] _ in
+            self?.checkForUpdates(manual: false)
+        }
+    }
+
+    private func fileModDate(_ relativePath: String) -> Date? {
+        let full = (rootDir as NSString).appendingPathComponent(relativePath)
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: full) else { return nil }
+        return attrs[.modificationDate] as? Date
+    }
+
+    private func runSyncCommand(_ launchPath: String, _ args: [String], cwd: String) -> (Int32, String) {
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: launchPath)
+        proc.arguments = args
+        proc.currentDirectoryURL = URL(fileURLWithPath: cwd)
+        let pipe = Pipe()
+        proc.standardOutput = pipe
+        proc.standardError = pipe
+        do {
+            try proc.run()
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            proc.waitUntilExit()
+            let out = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return (proc.terminationStatus, out)
+        } catch {
+            return (-1, error.localizedDescription)
+        }
+    }
+
+    private func checkForUpdates(manual: Bool) {
+        guard !rootDir.isEmpty else { return }
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard let self = self else { return }
+            if self.isUpdating { return }
+            self.isUpdating = true
+            defer { self.isUpdating = false }
+
+            // 1. Pull origin/main cleanly if working tree has no local edits
+            let gitDir = (self.rootDir as NSString).appendingPathComponent(".git")
+            if FileManager.default.fileExists(atPath: gitDir) {
+                let (stCode, stOut) = self.runSyncCommand("/usr/bin/git", ["status", "--porcelain"], cwd: self.rootDir)
+                if stCode == 0 && stOut.isEmpty {
+                    let (fetchCode, _) = self.runSyncCommand("/usr/bin/git", ["fetch", "origin", "main", "--quiet"], cwd: self.rootDir)
+                    if fetchCode == 0 {
+                        let (cntCode, cntOut) = self.runSyncCommand("/usr/bin/git", ["rev-list", "HEAD..origin/main", "--count"], cwd: self.rootDir)
+                        if cntCode == 0, let ahead = Int(cntOut), ahead > 0 {
+                            _ = self.runSyncCommand("/usr/bin/git", ["pull", "--ff-only", "origin", "main"], cwd: self.rootDir)
+                        }
+                    }
+                }
+            }
+
+            // 2. Check if native Swift / icon / build script changed vs running binary
+            let exeDate: Date = {
+                if let exeURL = Bundle.main.executableURL,
+                   let attrs = try? FileManager.default.attributesOfItem(atPath: exeURL.path),
+                   let d = attrs[.modificationDate] as? Date {
+                    return d
+                }
+                return Date.distantFuture
+            }()
+
+            let nativeFiles = ["macos/TextAIToolsMac.swift", "macos/build.sh", "icons/icon1024.png"]
+            let needsRebuild = nativeFiles.contains { rel in
+                if let m = self.fileModDate(rel) { return m > exeDate }
+                return false
+            }
+
+            if needsRebuild {
+                self.triggerBackgroundRebuildAndRelaunch()
+                return
+            }
+
+            // 3. Check if JS worker / engine files changed vs worker start time
+            let jsFiles = [
+                "macos/engine-worker.mjs",
+                "shared/actions.js",
+                "content/spellcheck-engine.js",
+                "content/turkish-morphology.js",
+                "content/turkish-deasciifier.js",
+                "content/language-registry.js",
+                "content/personal-model.js"
+            ]
+            let workerDate = self.worker.startedAt
+            let needsWorkerRestart = jsFiles.contains { rel in
+                if let m = self.fileModDate(rel) { return m > workerDate }
+                return false
+            }
+
+            if needsWorkerRestart {
+                DispatchQueue.main.async {
+                    self.worker.restart()
+                    if manual {
+                        self.showUpdateAlert(title: "Engine Reloaded ✓", message: "Updated JavaScript engine files were reloaded in the background without restarting the app.")
+                    }
+                }
+                return
+            }
+
+            if manual {
+                DispatchQueue.main.async {
+                    self.showUpdateAlert(title: "You're Up to Date ✓", message: "No new updates found in GitHub (origin/main) or local source files.")
+                }
+            }
+        }
+    }
+
+    private func showUpdateAlert(title: String, message: String) {
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.runModal()
+    }
+
+    private func triggerBackgroundRebuildAndRelaunch() {
+        let appBundle = Bundle.main.bundleURL.path
+        let outDir = (appBundle as NSString).deletingLastPathComponent
+        let pid = ProcessInfo.processInfo.processIdentifier
+
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/bin/bash")
+        proc.arguments = [
+            "-c",
+            "nohup /bin/bash -c 'sleep 0.2; if bash \"$TAIT_ROOT/macos/build.sh\" \"$TAIT_OUT\" >/tmp/text-ai-tools-update.log 2>&1; then kill \"$TAIT_PID\" 2>/dev/null || true; sleep 0.4; open \"$TAIT_BUNDLE\"; fi' >/dev/null 2>&1 &"
+        ]
+        var env = ProcessInfo.processInfo.environment
+        env["TAIT_ROOT"] = rootDir
+        env["TAIT_OUT"] = outDir
+        env["TAIT_BUNDLE"] = appBundle
+        env["TAIT_PID"] = "\(pid)"
+        proc.environment = env
+        try? proc.run()
+        proc.waitUntilExit()
     }
 
     private func requestAccessibilityIfNeeded() {
