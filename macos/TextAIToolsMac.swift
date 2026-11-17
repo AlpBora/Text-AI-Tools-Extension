@@ -286,6 +286,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var autoUpdateItem: NSMenuItem!
     private var retryTimer: Timer?
     private var updateTimer: Timer?
+    private var lastRemoteFetchAt: Date = .distantPast
     private var rootDir = ""
     private var isUpdating = false
     private var autoUpdateEnabled: Bool = {
@@ -503,7 +504,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self = self, self.autoUpdateEnabled else { return }
             self.checkForUpdates(manual: false)
         }
-        updateTimer = Timer.scheduledTimer(withTimeInterval: 60.0, repeats: true) { [weak self] _ in
+        updateTimer = Timer.scheduledTimer(withTimeInterval: 300.0, repeats: true) { [weak self] _ in
             self?.checkForUpdates(manual: false)
         }
     }
@@ -541,9 +542,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.isUpdating = true
             defer { self.isUpdating = false }
 
-            // 1. Pull origin/main cleanly if working tree has no local edits
+            // 1. Pull origin/main cleanly if working tree has no local edits (at most once per hour unless manual)
             let gitDir = (self.rootDir as NSString).appendingPathComponent(".git")
-            if FileManager.default.fileExists(atPath: gitDir) {
+            let shouldFetchRemote = manual || Date().timeIntervalSince(self.lastRemoteFetchAt) >= 3600.0
+            if shouldFetchRemote && FileManager.default.fileExists(atPath: gitDir) {
+                self.lastRemoteFetchAt = Date()
                 let (stCode, stOut) = self.runSyncCommand("/usr/bin/git", ["status", "--porcelain"], cwd: self.rootDir)
                 if stCode == 0 && stOut.isEmpty {
                     let (fetchCode, _) = self.runSyncCommand("/usr/bin/git", ["fetch", "origin", "main", "--quiet"], cwd: self.rootDir)
