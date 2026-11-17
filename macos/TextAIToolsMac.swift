@@ -200,47 +200,63 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func makeHandPenMenuBarImage() -> NSImage {
-        let size = NSSize(width: 18, height: 18)
+        let size = NSSize(width: 20, height: 18)
         let img = NSImage(size: size, flipped: false) { _ in
             NSColor.labelColor.setStroke()
             NSColor.labelColor.setFill()
 
-            // Diagonal pen body + nib pointing bottom-left
+            // Pen angled down-left
             let pen = NSBezierPath()
-            pen.lineWidth = 1.6
+            pen.lineWidth = 1.4
             pen.lineCapStyle = .round
             pen.lineJoinStyle = .round
-            pen.move(to: NSPoint(x: 4.0, y: 3.5))
-            pen.line(to: NSPoint(x: 6.2, y: 4.3))
-            pen.line(to: NSPoint(x: 14.8, y: 12.9))
-            pen.line(to: NSPoint(x: 13.0, y: 14.7))
-            pen.line(to: NSPoint(x: 4.4, y: 6.1))
+            pen.move(to: NSPoint(x: 3.4, y: 4.5))
+            pen.line(to: NSPoint(x: 5.1, y: 5.5))
+            pen.line(to: NSPoint(x: 9.8, y: 14.3))
+            pen.line(to: NSPoint(x: 8.3, y: 15.1))
+            pen.line(to: NSPoint(x: 3.6, y: 6.3))
             pen.close()
             pen.stroke()
 
-            // Pen tip dot
-            let tip = NSBezierPath(ovalIn: NSRect(x: 2.6, y: 2.3, width: 2.0, height: 2.0))
-            tip.fill()
-
-            // Hand fingers gripping the pen
+            // Hand + wrist cuff on the right
             let hand = NSBezierPath()
-            hand.lineWidth = 1.5
+            hand.lineWidth = 1.4
             hand.lineCapStyle = .round
             hand.lineJoinStyle = .round
-            // Thumb / index grip arc
-            hand.move(to: NSPoint(x: 7.2, y: 8.8))
-            hand.curve(to: NSPoint(x: 11.4, y: 9.2),
-                       controlPoint1: NSPoint(x: 8.4, y: 10.8),
-                       controlPoint2: NSPoint(x: 10.6, y: 10.8))
-            // Palm / wrist curve under the pen
-            hand.curve(to: NSPoint(x: 15.2, y: 4.8),
-                       controlPoint1: NSPoint(x: 13.2, y: 8.0),
-                       controlPoint2: NSPoint(x: 14.8, y: 6.5))
-            hand.move(to: NSPoint(x: 8.6, y: 6.4))
-            hand.curve(to: NSPoint(x: 12.6, y: 3.5),
-                       controlPoint1: NSPoint(x: 9.6, y: 4.6),
-                       controlPoint2: NSPoint(x: 11.2, y: 3.8))
+            // Upper hand curve to cuff
+            hand.move(to: NSPoint(x: 9.3, y: 13.0))
+            hand.curve(to: NSPoint(x: 15.2, y: 11.8),
+                       controlPoint1: NSPoint(x: 11.4, y: 12.6),
+                       controlPoint2: NSPoint(x: 13.4, y: 11.8))
+            // Lower palm & thumb grip
+            hand.move(to: NSPoint(x: 4.9, y: 7.4))
+            hand.curve(to: NSPoint(x: 9.8, y: 8.4),
+                       controlPoint1: NSPoint(x: 6.4, y: 8.2),
+                       controlPoint2: NSPoint(x: 8.2, y: 8.4))
+            hand.move(to: NSPoint(x: 5.6, y: 6.2))
+            hand.curve(to: NSPoint(x: 15.2, y: 7.4),
+                       controlPoint1: NSPoint(x: 8.8, y: 5.6),
+                       controlPoint2: NSPoint(x: 12.6, y: 7.4))
+            // Cuff rectangle
+            hand.move(to: NSPoint(x: 15.2, y: 6.6))
+            hand.line(to: NSPoint(x: 17.6, y: 6.6))
+            hand.line(to: NSPoint(x: 17.6, y: 12.6))
+            hand.line(to: NSPoint(x: 15.2, y: 12.6))
+            hand.close()
             hand.stroke()
+
+            // Wavy line underneath
+            let wave = NSBezierPath()
+            wave.lineWidth = 1.4
+            wave.lineCapStyle = .round
+            wave.move(to: NSPoint(x: 2.4, y: 2.3))
+            wave.curve(to: NSPoint(x: 6.2, y: 2.3),
+                       controlPoint1: NSPoint(x: 3.6, y: 1.1),
+                       controlPoint2: NSPoint(x: 5.0, y: 3.5))
+            wave.curve(to: NSPoint(x: 10.0, y: 2.3),
+                       controlPoint1: NSPoint(x: 7.4, y: 1.1),
+                       controlPoint2: NSPoint(x: 8.8, y: 3.5))
+            wave.stroke()
             return true
         }
         img.isTemplate = true

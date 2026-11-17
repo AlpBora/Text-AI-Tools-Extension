@@ -20,7 +20,11 @@ echo "Generating AppIcon.icns..."
 ICONSET_DIR="$(mktemp -d)/AppIcon.iconset"
 mkdir -p "$ICONSET_DIR"
 BASE_PNG="$ICONSET_DIR/base_1024.png"
-swift "$SCRIPT_DIR/make_icon.swift" "$BASE_PNG"
+if [ -f "$ROOT_DIR/icons/icon1024.png" ]; then
+  cp "$ROOT_DIR/icons/icon1024.png" "$BASE_PNG"
+else
+  swift "$SCRIPT_DIR/make_icon.swift" "$BASE_PNG"
+fi
 for sz in 16 32 128 256 512; do
   sips -z "$sz" "$sz" "$BASE_PNG" --out "$ICONSET_DIR/icon_${sz}x${sz}.png" >/dev/null
   sz2=$((sz * 2))
