@@ -80,17 +80,6 @@ final class GlassActionButton: NSButton {
             layer?.borderWidth = 0.8
             layer?.borderColor = NSColor.white.withAlphaComponent(0.18).cgColor
         }
-        let para = NSMutableParagraphStyle()
-        para.alignment = .left
-        let attr = NSAttributedString(
-            string: "  " + title,
-            attributes: [
-                .foregroundColor: NSColor.white,
-                .font: NSFont.systemFont(ofSize: 12, weight: .medium),
-                .paragraphStyle: para
-            ]
-        )
-        attributedTitle = attr
     }
 
     override var title: String {
@@ -1096,7 +1085,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         var curY = height - 60
         for act in actions {
             let btn = GlassActionButton(frame: NSRect(x: 10, y: curY, width: width - 20, height: 27))
-            btn.title = act.title
+            btn.title = "  " + act.title
             btn.isPrimaryGlass = act.primary
             btn.keyEquivalent = act.key
             btn.target = ActionTarget.shared
