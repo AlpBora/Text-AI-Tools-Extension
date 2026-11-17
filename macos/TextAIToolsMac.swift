@@ -3,6 +3,12 @@ import Carbon
 import ApplicationServices
 
 let TAIT_MAGIC_USERDATA: Int64 = 0x54414954 // "TAIT"
+let NX_DEVICERCMDKEYMASK: UInt64 = 0x00000010 // Right Command key mask
+
+final class InlineActionPanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { false }
+}
 
 final class WorkerBridge {
     private var process: Process?
@@ -165,6 +171,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var skipBrowsersItem: NSMenuItem!
     private var statusMenuItem: NSMenuItem!
     private var retryTimer: Timer?
+    private var actionPanel: InlineActionPanel?
+    private var savedFrontApp: NSRunningApplication?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let rootDir = (Bundle.main.object(forInfoDictionaryKey: "TextAIToolsRootDir") as? String)
@@ -376,6 +384,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let flags = event.flags
         let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
 
+        // Global Hotkey: Right Cmd + . (keyCode 47 + NX_DEVICERCMDKEYMASK)
+        if keyCode == 47 && flags.contains(.maskCommand) && (flags.rawValue & NX_DEVICERCMDKEYMASK) != 0 &&
+           !flags.contains(.maskShift) && !flags.contains(.maskControl) && !flags.contains(.maskAlternate) {
+            wordBuffer = ""
+            lastUndo = nil
+            DispatchQueue.main.async { [weak self] in
+                self?.triggerGlobalSelectionMenu()
+            }
+            return nil
+        }
+
         // Cmd+Z immediate undo after auto-correct
         if flags.contains(.maskCommand) && !flags.contains(.maskShift) && keyCode == 6 /* Z */ {
             if let undo = lastUndo, Date().timeIntervalSince(undo.timestamp) < 12.0 {
@@ -513,6 +532,247 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             idx = end
         }
+    }
+
+    // MARK: - Global Hotkey (Right Cmd + .) Selection Menu
+
+    private func postCommandKey(virtualKey: CGKeyCode) {
+        let src = CGEventSource(stateID: .privateState)
+        if let down = CGEvent(keyboardEventSource: src, virtualKey: virtualKey, keyDown: true),
+           let up = CGEvent(keyboardEventSource: src, virtualKey: virtualKey, keyDown: false) {
+            down.flags = .maskCommand
+            up.flags = .maskCommand
+            down.setIntegerValueField(.eventSourceUserData, value: TAIT_MAGIC_USERDATA)
+            up.setIntegerValueField(.eventSourceUserData, value: TAIT_MAGIC_USERDATA)
+            down.post(tap: .cghidEventTap)
+            up.post(tap: .cghidEventTap)
+        }
+    }
+
+    private func triggerGlobalSelectionMenu() {
+        savedFrontApp = NSWorkspace.shared.frontmostApplication
+        let pb = NSPasteboard.general
+        let prevString = pb.string(forType: .string)
+        let prevChangeCount = pb.changeCount
+
+        // Send Cmd+C to copy current selection
+        postCommandKey(virtualKey: 8) // 'c'
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.11) { [weak self] in
+            guard let self = self else { return }
+            let changed = pb.changeCount != prevChangeCount
+            let selectedText = (changed ? pb.string(forType: .string) : nil) ?? ""
+
+            // Restore previous clipboard immediately
+            if let prev = prevString {
+                pb.clearContents()
+                pb.setString(prev, forType: .string)
+            }
+
+            let trimmed = selectedText.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty {
+                self.showQuickStatusPanel(message: "Select some text first, then press Right ⌘ + .")
+                return
+            }
+
+            self.showActionMenuPanel(selectedText: selectedText, previousClipboard: prevString)
+        }
+    }
+
+    private func showQuickStatusPanel(message: String) {
+        actionPanel?.close()
+        let panel = createPanel(width: 310, height: 64)
+        let label = NSTextField(labelWithString: message)
+        label.font = NSFont.systemFont(ofSize: 12, weight: .medium)
+        label.alignment = .center
+        label.frame = NSRect(x: 12, y: 20, width: 286, height: 24)
+        panel.contentView?.addSubview(label)
+        panel.makeKeyAndOrderFront(nil)
+        actionPanel = panel
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) { [weak panel] in
+            panel?.close()
+        }
+    }
+
+    private func createPanel(width: CGFloat, height: CGFloat) -> InlineActionPanel {
+        let mouse = NSEvent.mouseLocation
+        let screenFrame = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+        var x = mouse.x - width / 2
+        var y = mouse.y - height - 12
+        x = max(screenFrame.minX + 12, min(screenFrame.maxX - width - 12, x))
+        y = max(screenFrame.minY + 12, min(screenFrame.maxY - height - 12, y))
+
+        let panel = InlineActionPanel(
+            contentRect: NSRect(x: x, y: y, width: width, height: height),
+            styleMask: [.titled, .closable, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+        panel.title = "✦ Text AI Tools"
+        panel.isFloatingPanel = true
+        panel.level = .floating
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.isReleasedWhenClosed = false
+        return panel
+    }
+
+    private func showActionMenuPanel(selectedText: String, previousClipboard: String?) {
+        actionPanel?.close()
+        let width: CGFloat = 320
+        let height: CGFloat = 176
+        let panel = createPanel(width: width, height: height)
+        guard let contentView = panel.contentView else { return }
+
+        let actions: [(id: String, title: String, key: String)] = [
+            ("fix", "1. Fix Grammar", "1"),
+            ("concise", "2. Shorten (Keep Meaning)", "2"),
+            ("professional", "3. Professional", "3"),
+            ("translate", "4. Translate (TR ↔ EN)", "4"),
+            ("summarize", "5. Summarize", "5")
+        ]
+
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 6
+        stack.frame = NSRect(x: 14, y: 12, width: width - 28, height: height - 42)
+
+        for act in actions {
+            let btn = NSButton(title: act.title, target: nil, action: nil)
+            btn.bezelStyle = .rounded
+            btn.controlSize = .regular
+            btn.widthAnchor.constraint(equalToConstant: width - 28).isActive = true
+            btn.keyEquivalent = act.key
+            btn.target = ActionTarget.shared
+            btn.action = #selector(ActionTarget.handleClick(_:))
+            ActionTarget.shared.register(button: btn) { [weak self, weak panel] in
+                guard let self = self, let panel = panel else { return }
+                self.executePanelAction(
+                    actionId: act.id,
+                    label: act.title,
+                    selectedText: selectedText,
+                    previousClipboard: previousClipboard,
+                    panel: panel
+                )
+            }
+            stack.addArrangedSubview(btn)
+        }
+
+        contentView.addSubview(stack)
+        NSApp.activate(ignoringOtherApps: true)
+        panel.makeKeyAndOrderFront(nil)
+        actionPanel = panel
+    }
+
+    private func executePanelAction(
+        actionId: String,
+        label: String,
+        selectedText: String,
+        previousClipboard: String?,
+        panel: InlineActionPanel
+    ) {
+        panel.contentView?.subviews.forEach { $0.removeFromSuperview() }
+        let statusLbl = NSTextField(labelWithString: "Running \(label)…")
+        statusLbl.font = NSFont.systemFont(ofSize: 13, weight: .medium)
+        statusLbl.frame = NSRect(x: 16, y: (panel.frame.height - 44) / 2, width: panel.frame.width - 32, height: 22)
+        panel.contentView?.addSubview(statusLbl)
+
+        worker.sendAsync(["type": "inlineAction", "actionId": actionId, "text": selectedText]) { [weak self] resp in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                let ok = (resp["ok"] as? Bool) ?? false
+                if !ok {
+                    let err = (resp["error"] as? String) ?? "Gemini request failed."
+                    self.showPanelResult(text: err, isError: true, previousClipboard: previousClipboard, panel: panel)
+                    return
+                }
+                let resultText = ((resp["result"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                let mode = (resp["mode"] as? String) ?? "modal"
+                if mode == "replace" {
+                    panel.close()
+                    self.pasteReplacement(resultText, restoreClipboard: previousClipboard)
+                } else {
+                    self.showPanelResult(text: resultText, isError: false, previousClipboard: previousClipboard, panel: panel)
+                }
+            }
+        }
+    }
+
+    private func pasteReplacement(_ text: String, restoreClipboard: String?) {
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(text, forType: .string)
+
+        savedFrontApp?.activate(options: [])
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
+            self?.postCommandKey(virtualKey: 9) // 'v'
+            if let prev = restoreClipboard {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                    pb.clearContents()
+                    pb.setString(prev, forType: .string)
+                }
+            }
+        }
+    }
+
+    private func showPanelResult(text: String, isError: Bool, previousClipboard: String?, panel: InlineActionPanel) {
+        let newWidth: CGFloat = 380
+        let newHeight: CGFloat = 230
+        var frame = panel.frame
+        frame.size = NSSize(width: newWidth, height: newHeight)
+        panel.setFrame(frame, display: true)
+        guard let contentView = panel.contentView else { return }
+        contentView.subviews.forEach { $0.removeFromSuperview() }
+
+        let scroll = NSScrollView(frame: NSRect(x: 12, y: 46, width: newWidth - 24, height: newHeight - 82))
+        scroll.hasVerticalScroller = true
+        let tv = NSTextView(frame: scroll.bounds)
+        tv.isEditable = false
+        tv.font = NSFont.systemFont(ofSize: 12.5)
+        tv.string = text
+        if isError { tv.textColor = .systemRed }
+        scroll.documentView = tv
+        contentView.addSubview(scroll)
+
+        let copyBtn = NSButton(title: "Copy & Close", target: nil, action: nil)
+        copyBtn.bezelStyle = .rounded
+        copyBtn.frame = NSRect(x: newWidth - 126, y: 10, width: 114, height: 28)
+        copyBtn.keyEquivalent = "\r"
+        copyBtn.target = ActionTarget.shared
+        copyBtn.action = #selector(ActionTarget.handleClick(_:))
+        ActionTarget.shared.register(button: copyBtn) { [weak panel] in
+            let pb = NSPasteboard.general
+            pb.clearContents()
+            pb.setString(text, forType: .string)
+            panel?.close()
+        }
+        contentView.addSubview(copyBtn)
+
+        if !isError {
+            let replaceBtn = NSButton(title: "Replace Selection", target: nil, action: nil)
+            replaceBtn.bezelStyle = .rounded
+            replaceBtn.frame = NSRect(x: 12, y: 10, width: 140, height: 28)
+            replaceBtn.target = ActionTarget.shared
+            replaceBtn.action = #selector(ActionTarget.handleClick(_:))
+            ActionTarget.shared.register(button: replaceBtn) { [weak self, weak panel] in
+                panel?.close()
+                self?.pasteReplacement(text, restoreClipboard: previousClipboard)
+            }
+            contentView.addSubview(replaceBtn)
+        }
+    }
+}
+
+final class ActionTarget: NSObject {
+    static let shared = ActionTarget()
+    private var handlers: [ObjectIdentifier: () -> Void] = [:]
+
+    func register(button: NSButton, handler: @escaping () -> Void) {
+        handlers[ObjectIdentifier(button)] = handler
+    }
+
+    @objc func handleClick(_ sender: NSButton) {
+        handlers[ObjectIdentifier(sender)]?()
     }
 }
 
