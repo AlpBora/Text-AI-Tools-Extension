@@ -241,11 +241,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func promptApiKey() {
+        _ = promptAndSaveApiKeyToKeychain()
+    }
+
+    @discardableResult
+    private func promptAndSaveApiKeyToKeychain() -> Bool {
         NSApp.activate(ignoringOtherApps: true)
         let alert = NSAlert()
         alert.messageText = "Gemini API Key"
-        alert.informativeText = "Stored locally in ~/.text-ai-tools/config.json (chmod 600)."
-        alert.addButton(withTitle: "Save")
+        alert.informativeText = "Saved securely in your macOS Keychain (TextAITools-Gemini-API-Key). Never stored in plaintext."
+        alert.addButton(withTitle: "Save to Keychain")
         alert.addButton(withTitle: "Cancel")
 
         let input = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 300, height: 24))
@@ -255,9 +260,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if alert.runModal() == .alertFirstButtonReturn {
             let key = input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
             if !key.isEmpty {
-                worker.sendAsync(["type": "setConfig", "apiKey": key]) { _ in }
+                _ = worker.sendSync(["type": "setConfig", "apiKey": key], timeoutMs: 1000)
+                return true
             }
         }
+        return false
     }
 
     @objc private func checkAccessibility() {
@@ -682,6 +689,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 guard let self = self else { return }
                 let ok = (resp["ok"] as? Bool) ?? false
                 if !ok {
+                    let code = (resp["code"] as? String) ?? ""
+                    if code == "MISSING_API_KEY" {
+                        panel.close()
+                        if self.promptAndSaveApiKeyToKeychain() {
+                            let retryPanel = self.createPanel(width: 320, height: 176)
+                            retryPanel.makeKeyAndOrderFront(nil)
+                            self.actionPanel = retryPanel
+                            self.executePanelAction(
+                                actionId: actionId,
+                                label: label,
+                                selectedText: selectedText,
+                                previousClipboard: previousClipboard,
+                                panel: retryPanel
+                            )
+                        }
+                        return
+                    }
                     let err = (resp["error"] as? String) ?? "Gemini request failed."
                     self.showPanelResult(text: err, isError: true, previousClipboard: previousClipboard, panel: panel)
                     return

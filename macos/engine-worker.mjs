@@ -9,6 +9,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import readline from "node:readline";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
 
@@ -32,9 +33,55 @@ const { ACTIONS, callGemini } = actionsMod;
 const STATE_DIR = path.join(os.homedir(), ".text-ai-tools");
 const CONFIG_PATH = path.join(STATE_DIR, "config.json");
 const HABITS_PATH = path.join(STATE_DIR, "habits.json");
+const KEYCHAIN_SERVICES = [
+  "TextAITools-Gemini-API-Key",
+  "GEMINI_API_KEY",
+  "gemini-api-key",
+  "generativelanguage.googleapis.com",
+];
 
 function ensureStateDir() {
   fs.mkdirSync(STATE_DIR, { recursive: true });
+}
+
+function readApiKeyFromKeychain() {
+  if (process.platform !== "darwin") return "";
+  const account = os.userInfo().username;
+  for (const svc of KEYCHAIN_SERVICES) {
+    try {
+      const val = execFileSync(
+        "/usr/bin/security",
+        ["find-generic-password", "-a", account, "-s", svc, "-w"],
+        { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }
+      ).trim();
+      if (val) return val;
+    } catch {
+      // Not found under this service name
+    }
+    try {
+      const valAny = execFileSync(
+        "/usr/bin/security",
+        ["find-generic-password", "-s", svc, "-w"],
+        { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }
+      ).trim();
+      if (valAny) return valAny;
+    } catch {
+      // Not found
+    }
+  }
+  return "";
+}
+
+function saveApiKeyToKeychain(apiKey) {
+  const clean = String(apiKey || "").trim();
+  if (!clean || process.platform !== "darwin") return false;
+  const account = os.userInfo().username;
+  execFileSync(
+    "/usr/bin/security",
+    ["add-generic-password", "-U", "-a", account, "-s", KEYCHAIN_SERVICES[0], "-w", clean],
+    { stdio: ["ignore", "ignore", "pipe"] }
+  );
+  return true;
 }
 
 function loadConfig() {
@@ -42,23 +89,27 @@ function loadConfig() {
     primaryLanguage: "Turkish",
     secondaryLanguage: "English",
     autoCorrectEnabled: true,
-    apiKey: process.env.GEMINI_API_KEY || "",
     model: "gemini-3.5-flash-lite",
   };
+  let parsed = {};
   try {
     if (fs.existsSync(CONFIG_PATH)) {
-      const parsed = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8"));
-      return { ...defaults, ...parsed };
+      parsed = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8"));
     }
   } catch {
     // ignore corrupt config
   }
-  return defaults;
+  const merged = { ...defaults, ...parsed };
+  // Never rely on plaintext config.json for apiKey; prefer Keychain or env var
+  const keychainKey = readApiKeyFromKeychain();
+  merged.apiKey = keychainKey || process.env.GEMINI_API_KEY || "";
+  return merged;
 }
 
 function saveConfig(cfg) {
   ensureStateDir();
-  fs.writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2), { mode: 0o600 });
+  const { apiKey: _omit, ...safeCfg } = cfg;
+  fs.writeFileSync(CONFIG_PATH, JSON.stringify(safeCfg, null, 2), { mode: 0o600 });
 }
 
 function loadHabits() {
@@ -165,13 +216,18 @@ export async function handleRequest(req) {
   }
 
   if (req.type === "setConfig") {
+    let nextKey = config.apiKey;
+    if (typeof req.apiKey === "string" && req.apiKey.trim()) {
+      nextKey = req.apiKey.trim();
+      saveApiKeyToKeychain(nextKey);
+    }
     config = {
       ...config,
       ...(req.primaryLanguage ? { primaryLanguage: String(req.primaryLanguage) } : {}),
       ...(req.secondaryLanguage ? { secondaryLanguage: String(req.secondaryLanguage) } : {}),
       ...(typeof req.autoCorrectEnabled === "boolean" ? { autoCorrectEnabled: req.autoCorrectEnabled } : {}),
-      ...(typeof req.apiKey === "string" ? { apiKey: req.apiKey.trim() } : {}),
       ...(req.model ? { model: String(req.model).trim() } : {}),
+      apiKey: nextKey,
     };
     saveConfig(config);
     return { ok: true, id: req.id };
@@ -224,7 +280,15 @@ export async function handleRequest(req) {
       return { ok: false, id: req.id, error: `Unknown action: ${actionId}` };
     }
     if (!config.apiKey) {
-      return { ok: false, id: req.id, error: "Gemini API key is not set in ~/.text-ai-tools/config.json" };
+      config.apiKey = readApiKeyFromKeychain() || process.env.GEMINI_API_KEY || "";
+    }
+    if (!config.apiKey) {
+      return {
+        ok: false,
+        id: req.id,
+        code: "MISSING_API_KEY",
+        error: "Gemini API key not found in macOS Keychain.",
+      };
     }
     try {
       const output = await callGemini({
