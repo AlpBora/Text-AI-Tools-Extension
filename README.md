@@ -47,7 +47,7 @@ Works with **any AI provider / model** (bring your own API key or local model) i
 ## 2. macOS System-Wide App
 
 <p align="center">
-  <img src="assets/app-icon-preview.png" alt="TextAIToolsMac App Icon" width="110" />
+  <img src="icons/icon1024.png" alt="Text AI Tools App Icon" width="160" />
 </p>
 
 ### Build & Launch
