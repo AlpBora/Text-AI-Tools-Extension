@@ -90,6 +90,15 @@ function loadConfig() {
     secondaryLanguage: "English",
     autoCorrectEnabled: true,
     model: "gemini-3.5-flash-lite",
+    hotkey: {
+      keyCode: 47,
+      cmd: true,
+      requireRightCmd: true,
+      opt: false,
+      ctrl: false,
+      shift: false,
+      label: "Right ⌘ + .",
+    },
   };
   let parsed = {};
   try {
@@ -211,6 +220,7 @@ export async function handleRequest(req) {
         autoCorrectEnabled: config.autoCorrectEnabled !== false,
         hasApiKey: Boolean(config.apiKey),
         model: config.model,
+        hotkey: config.hotkey,
       },
     };
   }
@@ -227,6 +237,7 @@ export async function handleRequest(req) {
       ...(req.secondaryLanguage ? { secondaryLanguage: String(req.secondaryLanguage) } : {}),
       ...(typeof req.autoCorrectEnabled === "boolean" ? { autoCorrectEnabled: req.autoCorrectEnabled } : {}),
       ...(req.model ? { model: String(req.model).trim() } : {}),
+      ...(req.hotkey && typeof req.hotkey === "object" ? { hotkey: req.hotkey } : {}),
       apiKey: nextKey,
     };
     saveConfig(config);

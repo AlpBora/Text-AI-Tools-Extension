@@ -270,9 +270,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var toggleItem: NSMenuItem!
     private var skipBrowsersItem: NSMenuItem!
     private var statusMenuItem: NSMenuItem!
+    private var hotkeyMenuItem: NSMenuItem!
     private var retryTimer: Timer?
     private var actionPanel: InlineActionPanel?
     private var savedFrontApp: NSRunningApplication?
+
+    private struct HotkeyConfig {
+        var keyCode: Int64 = 47
+        var cmd: Bool = true
+        var requireRightCmd: Bool = true
+        var opt: Bool = false
+        var ctrl: Bool = false
+        var shift: Bool = false
+        var label: String = "Right ⌘ + ."
+    }
+    private var hotkey = HotkeyConfig()
+    private var isRecordingHotkey = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let rootDir = (Bundle.main.object(forInfoDictionaryKey: "TextAIToolsRootDir") as? String)
@@ -280,6 +293,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         worker = WorkerBridge(rootDir: rootDir)
 
         setupMenuBar()
+        loadSavedHotkey()
         requestAccessibilityIfNeeded()
         startEventTap()
         if eventTap == nil {
@@ -355,6 +369,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(skipBrowsersItem)
 
         menu.addItem(NSMenuItem.separator())
+        hotkeyMenuItem = NSMenuItem(title: "Shortcut: \(hotkey.label) (Change…)", action: #selector(openShortcutRecorder), keyEquivalent: "")
+        menu.addItem(hotkeyMenuItem)
         menu.addItem(NSMenuItem(title: "Set Gemini API Key…", action: #selector(promptApiKey), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "Check / Retry Permissions", action: #selector(checkAccessibility), keyEquivalent: ""))
         menu.addItem(NSMenuItem.separator())
@@ -529,9 +545,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let flags = event.flags
         let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
 
-        // Global Hotkey: Right Cmd + . (keyCode 47 + NX_DEVICERCMDKEYMASK)
-        if keyCode == 47 && flags.contains(.maskCommand) && (flags.rawValue & NX_DEVICERCMDKEYMASK) != 0 &&
-           !flags.contains(.maskShift) && !flags.contains(.maskControl) && !flags.contains(.maskAlternate) {
+        // Global Hotkey check (customizable, defaults to Right Cmd + .)
+        if !isRecordingHotkey && matchesHotkey(keyCode: keyCode, flags: flags) {
             wordBuffer = ""
             lastUndo = nil
             DispatchQueue.main.async { [weak self] in
@@ -1004,6 +1019,129 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.pasteReplacement(text, restoreClipboard: previousClipboard)
             }
             contentView.addSubview(replaceBtn)
+        }
+    }
+
+    // MARK: - Customizable Shortcut Recorder
+
+    private func matchesHotkey(keyCode: Int64, flags: CGEventFlags) -> Bool {
+        guard keyCode == hotkey.keyCode else { return false }
+        if flags.contains(.maskCommand) != hotkey.cmd { return false }
+        if flags.contains(.maskAlternate) != hotkey.opt { return false }
+        if flags.contains(.maskControl) != hotkey.ctrl { return false }
+        if flags.contains(.maskShift) != hotkey.shift { return false }
+        if hotkey.cmd && hotkey.requireRightCmd {
+            if (flags.rawValue & NX_DEVICERCMDKEYMASK) == 0 { return false }
+        }
+        return true
+    }
+
+    private func loadSavedHotkey() {
+        worker.sendAsync(["type": "getConfig"]) { [weak self] resp in
+            guard let self = self,
+                  let cfg = resp["config"] as? [String: Any],
+                  let hk = cfg["hotkey"] as? [String: Any],
+                  let kc = hk["keyCode"] as? Int else { return }
+            DispatchQueue.main.async {
+                self.hotkey = HotkeyConfig(
+                    keyCode: Int64(kc),
+                    cmd: (hk["cmd"] as? Bool) ?? false,
+                    requireRightCmd: (hk["requireRightCmd"] as? Bool) ?? false,
+                    opt: (hk["opt"] as? Bool) ?? false,
+                    ctrl: (hk["ctrl"] as? Bool) ?? false,
+                    shift: (hk["shift"] as? Bool) ?? false,
+                    label: (hk["label"] as? String) ?? "Custom"
+                )
+                self.hotkeyMenuItem?.title = "Shortcut: \(self.hotkey.label) (Change…)"
+            }
+        }
+    }
+
+    private func saveHotkey(_ next: HotkeyConfig) {
+        self.hotkey = next
+        self.hotkeyMenuItem?.title = "Shortcut: \(next.label) (Change…)"
+        let dict: [String: Any] = [
+            "keyCode": Int(next.keyCode),
+            "cmd": next.cmd,
+            "requireRightCmd": next.requireRightCmd,
+            "opt": next.opt,
+            "ctrl": next.ctrl,
+            "shift": next.shift,
+            "label": next.label
+        ]
+        worker.sendAsync(["type": "setConfig", "hotkey": dict]) { _ in }
+    }
+
+    private func formatKeyName(keyCode: UInt16, chars: String?) -> String {
+        switch keyCode {
+        case 47: return "."
+        case 49: return "Space"
+        case 36: return "Return"
+        case 48: return "Tab"
+        case 44: return "/"
+        case 43: return ","
+        default:
+            let s = (chars ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            return s.isEmpty ? "Key(\(keyCode))" : s
+        }
+    }
+
+    @objc private func openShortcutRecorder() {
+        isRecordingHotkey = true
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = "Change Global Shortcut"
+        alert.informativeText = "Current: \(hotkey.label)\nPress your new key combination (with ⌘, ⌥, ⌃, or ⇧) now…"
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Reset (Right ⌘ + .)")
+        alert.addButton(withTitle: "Cancel")
+
+        let preview = NSTextField(labelWithString: "Waiting for key press…")
+        preview.alignment = .center
+        preview.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
+        preview.frame = NSRect(x: 0, y: 0, width: 280, height: 24)
+        alert.accessoryView = preview
+
+        var captured: HotkeyConfig?
+        let monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { ev in
+            let mod = ev.modifierFlags
+            let cmd = mod.contains(.command)
+            let opt = mod.contains(.option)
+            let ctrl = mod.contains(.control)
+            let shift = mod.contains(.shift)
+            if !cmd && !opt && !ctrl {
+                preview.stringValue = "Include ⌘, ⌥, or ⌃!"
+                return nil
+            }
+            let rightCmd = cmd && ((UInt64(mod.rawValue) & NX_DEVICERCMDKEYMASK) != 0)
+            var parts: [String] = []
+            if ctrl { parts.append("⌃") }
+            if opt { parts.append("⌥") }
+            if shift { parts.append("⇧") }
+            if cmd { parts.append(rightCmd ? "Right ⌘" : "⌘") }
+            parts.append(self.formatKeyName(keyCode: ev.keyCode, chars: ev.charactersIgnoringModifiers))
+            let lbl = parts.joined(separator: " + ")
+            captured = HotkeyConfig(
+                keyCode: Int64(ev.keyCode),
+                cmd: cmd,
+                requireRightCmd: rightCmd,
+                opt: opt,
+                ctrl: ctrl,
+                shift: shift,
+                label: lbl
+            )
+            preview.stringValue = lbl
+            return nil
+        }
+
+        let response = alert.runModal()
+        if let m = monitor { NSEvent.removeMonitor(m) }
+        isRecordingHotkey = false
+
+        if response == .alertFirstButtonReturn, let next = captured {
+            saveHotkey(next)
+        } else if response == .alertSecondButtonReturn {
+            saveHotkey(HotkeyConfig())
         }
     }
 }
