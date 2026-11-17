@@ -38,6 +38,8 @@ Works with **any AI provider / model** (bring your own API key or local model) i
 
 ## 2. macOS System-Wide App
 
+<img src="assets/app-icon-preview.png" alt="TextAIToolsMac App Icon" width="120" />
+
 ### Build & Launch
 ```bash
 bash macos/build.sh
