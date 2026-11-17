@@ -153,7 +153,7 @@
     if (
       morph &&
       typeof morph.generateInflectedCandidates === "function" &&
-      !(currentlyValid && wordHits && wordHits.length > 0)
+      !hasDiacritics
     ) {
       const morphCands = morph.generateInflectedCandidates(lower, trLexicon, 12, { foldedOnly: true });
       for (const mc of morphCands) {
@@ -191,13 +191,26 @@
       return b.score - a.score;
     });
 
-    // If input word is ALREADY a valid Turkish word:
-    if (currentlyValid) {
+    // Pure ASCII word that passed morphological/root check, yet has a dominant diacritic twin
+    // (e.g. degil -> değil, simdi -> şimdi, baska -> başka, kotu -> kötü, kisi -> kişi, aksam -> akşam, kopek -> köpek)
+    const asciiFreq = trLexicon && trLexicon.words && trLexicon.words[lower] ? trLexicon.words[lower] : 0;
+    const alternatives = sortedAll.filter((c) => c.word !== lower);
+    const dominantDiacriticOverride =
+      !hasDiacritics &&
+      alternatives.length > 0 &&
+      (lower.length >= 4 || lower === "tum" || lower === "dun") &&
+      alternatives[0].freq >= 435 &&
+      alternatives[0].freq - asciiFreq >= 175 &&
+      (alternatives.length === 1 ||
+        alternatives[1].freq === 0 ||
+        alternatives[0].freq - alternatives[1].freq >= 150);
+
+    // If input word is ALREADY a valid Turkish word (and not overridden by a dominant diacritic form):
+    if (currentlyValid && !dominantDiacriticOverride) {
       if (hasDiacritics) {
         return { status: "unchanged", candidates: [] };
       }
       // Pure ASCII valid Turkish word: check if diacritic-restored homographs exist
-      const alternatives = sortedAll.filter((c) => c.word !== lower);
       if (alternatives.length > 0) {
         return {
           status: "homograph_kept",
@@ -236,7 +249,7 @@
       (top.freq > 0 && second.freq === 0) ||
       (top.isRoot && !second.isRoot && second.freq < 220) ||
       (top.freq >= 300 && second.freq < 220 && top.freq - second.freq >= 100) ||
-      (top.freq >= 400 && top.freq - second.freq >= 220)
+      (top.freq >= 400 && top.freq - second.freq >= 195)
     ) {
       return { status: "unambiguous", candidates: formatted };
     }

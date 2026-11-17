@@ -1004,10 +1004,42 @@
       };
     }
 
+    // Pre-check if Turkish deasciifier has an unambiguous diacritic restoration for pure-ASCII input
+    let preDeascTr = null;
+    if (
+      activeWithLexicon.includes("tr") &&
+      normLexicons.tr &&
+      deasciifier &&
+      typeof deasciifier.deasciifyWord === "function" &&
+      !/[çğıöşüâîûÇĞİÖŞÜÂÎÛ]/.test(cleanWord)
+    ) {
+      const dRes = deasciifier.deasciifyWord(cleanWord, normLexicons.tr, morph);
+      if (dRes && dRes.status === "unambiguous" && dRes.candidates && dRes.candidates.length > 0) {
+        const topTrWord = trLower(dRes.candidates[0].word);
+        const trIdx = getLexiconIndex(normLexicons.tr, getProfile("tr"));
+        const trFreq = (trIdx && trIdx.exactMap.get(topTrWord)) || 0;
+        preDeascTr = { dRes, topTrWord, trFreq };
+      }
+    }
+
     // 1. Check if word is valid in ANY active configured language (bilingual code-switching)
     for (const langId of activeWithLexicon) {
       const profile = getProfile(langId);
       if (isValidInSingleLexicon(cleanWord, langId, normLexicons[langId], profile, morph)) {
+        // Do not short-circuit as valid if Turkish deasciifier found a dominant unambiguous restoration:
+        // - In Turkish itself (e.g. degil -> değil, simdi -> şimdi, baska -> başka, kisi -> kişi)
+        if (langId === "tr" && preDeascTr) {
+          continue;
+        }
+        // - Or in a secondary language when Turkish is the active context/primary language and the Turkish
+        //   diacritic word is higher-frequency than the secondary-language homograph (e.g. gore -> göre, boyle -> böyle, gun -> gün, once -> önce)
+        if (langId !== "tr" && guess.primary === "tr" && preDeascTr && preDeascTr.trFreq >= 420) {
+          const secIdx = getLexiconIndex(normLexicons[langId], profile);
+          const secFreq = (secIdx && secIdx.exactMap.get(cleanWord.toLowerCase())) || 0;
+          if (preDeascTr.trFreq > secFreq) {
+            continue;
+          }
+        }
         return {
           valid: true,
           decision: "valid",

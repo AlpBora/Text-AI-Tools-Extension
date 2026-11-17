@@ -335,13 +335,18 @@ describe("M2: Turkish Morphology, Deasciifier, Homographs & Ambiguity Integratio
     assert.ok(soyleWords.includes("şöyle"));
   });
 
-  it("auto-corrects agaclık -> ağaçlık, sarkı -> şarkı, and caglayan -> çağlayan without false uncertainty", () => {
+  it("auto-corrects agaclık -> ağaçlık, sarkı -> şarkı, caglayan -> çağlayan, and gore -> göre without false uncertainty", () => {
     const cases = [
       ["agaclık", "ağaçlık"],
       ["agaclik", "ağaçlık"],
       ["sarkı", "şarkı"],
       ["sarki", "şarkı"],
       ["caglayan", "çağlayan"],
+      ["gore", "göre"],
+      ["boyle", "böyle"],
+      ["degil", "değil"],
+      ["simdi", "şimdi"],
+      ["kisi", "kişi"],
     ];
     for (const [input, expected] of cases) {
       const res = SpellcheckEngine.checkWord({
