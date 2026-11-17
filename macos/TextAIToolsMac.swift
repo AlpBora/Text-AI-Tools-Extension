@@ -34,6 +34,19 @@ final class LiquidGlassContainer: NSVisualEffectView {
         gradientLayer.startPoint = CGPoint(x: 0.0, y: 1.0)
         gradientLayer.endPoint = CGPoint(x: 1.0, y: 0.0)
         layer?.insertSublayer(gradientLayer, at: 0)
+        maskImage = Self.makeRoundedMaskImage(radius: 16)
+    }
+
+    private static func makeRoundedMaskImage(radius: CGFloat) -> NSImage {
+        let edge = radius * 2 + 2
+        let img = NSImage(size: NSSize(width: edge, height: edge), flipped: false) { rect in
+            NSColor.black.setFill()
+            NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius).fill()
+            return true
+        }
+        img.capInsets = NSEdgeInsets(top: radius, left: radius, bottom: radius, right: radius)
+        img.resizingMode = .stretch
+        return img
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
