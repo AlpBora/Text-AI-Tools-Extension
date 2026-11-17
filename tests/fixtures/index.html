@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Text AI Tools — E2E Editor Fixture</title>
+    <style>
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        max-width: 860px;
+        margin: 24px auto;
+        padding: 0 16px;
+        line-height: 1.5;
+        color: #111827;
+      }
+      section {
+        margin-bottom: 20px;
+        padding: 12px 14px;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+      }
+      label {
+        display: block;
+        font-weight: 600;
+        margin-bottom: 6px;
+      }
+      input, textarea {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 8px 10px;
+        font-size: 15px;
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+      }
+      #ce-editor {
+        min-height: 110px;
+        padding: 10px;
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        font-size: 15px;
+        white-space: pre-wrap;
+        outline: none;
+      }
+      iframe {
+        border: 1px solid #94a3b8;
+        border-radius: 6px;
+        display: block;
+      }
+    </style>
+  </head>
+  <body>
+    <h1 id="fixture-title">Text AI Tools E2E Fixture</h1>
+
+    <section>
+      <label for="text-input">Text Input</label>
+      <input id="text-input" type="text" aria-label="Text Input" placeholder="Type here..." />
+    </section>
+
+    <section>
+      <label for="search-input">Search Input</label>
+      <input id="search-input" type="search" aria-label="Search Input" placeholder="Search..." />
+    </section>
+
+    <section>
+      <label for="password-input">Password Input (Must Not Be Checked)</label>
+      <input id="password-input" type="password" aria-label="Password Input" placeholder="Secret..." />
+    </section>
+
+    <section>
+      <label for="email-input">Email Input (Must Not Be Checked)</label>
+      <input id="email-input" type="email" aria-label="Email Input" placeholder="user@example.com" />
+    </section>
+
+    <section>
+      <label for="url-input">URL Input (Must Not Be Checked)</label>
+      <input id="url-input" type="url" aria-label="URL Input" placeholder="https://example.com" />
+    </section>
+
+    <section>
+      <label for="readonly-input">Readonly Input</label>
+      <input id="readonly-input" type="text" aria-label="Readonly Input" readonly value="Immutable value" />
+    </section>
+
+    <section>
+      <label for="main-textarea">Main Textarea</label>
+      <textarea id="main-textarea" rows="5" cols="64" aria-label="Main Textarea" placeholder="Write sentences here..."></textarea>
+    </section>
+
+    <section>
+      <label for="ce-editor">ContentEditable Editor</label>
+      <div id="ce-editor" contenteditable="true" role="textbox" aria-multiline="true" aria-label="ContentEditable Editor"></div>
+    </section>
+
+    <section>
+      <label for="same-origin-iframe">Same-Origin Iframe</label>
+      <iframe id="same-origin-iframe" src="/iframe-inner.html" width="640" height="260" title="Same-Origin Iframe"></iframe>
+    </section>
+
+    <section>
+      <label for="small-iframe">Small Iframe (Modal Routing)</label>
+      <iframe id="small-iframe" src="/iframe-inner.html" width="220" height="100" title="Small Iframe"></iframe>
+    </section>
+
+    <section>
+      <label for="srcdoc-iframe">Srcdoc Iframe</label>
+      <iframe
+        id="srcdoc-iframe"
+        width="640"
+        height="220"
+        title="Srcdoc Iframe"
+        srcdoc="<!DOCTYPE html><html><body style='font-family:sans-serif;padding:8px;margin:0;'><textarea id='srcdoc-textarea' rows='3' style='width:100%;font-size:14px;' aria-label='Srcdoc Textarea'></textarea><div id='srcdoc-ce' contenteditable='true' role='textbox' aria-multiline='true' aria-label='Srcdoc ContentEditable' style='min-height:60px;border:1px solid #ccc;padding:6px;margin-top:8px;white-space:pre-wrap;'></div></body></html>"
+      ></iframe>
+    </section>
+  </body>
+</html>

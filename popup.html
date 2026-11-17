@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Text AI Tools</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body class="popup-body">
+    <div class="header">
+      <div class="title-wrap">
+        <img src="icons/icon48.png" alt="Logo" />
+        <h1>Text AI Tools</h1>
+      </div>
+      <div class="row">
+        <button id="open-shortcuts" class="link-btn" type="button">Shortcuts</button>
+        <button id="open-options" class="link-btn" type="button">Settings</button>
+      </div>
+    </div>
+
+    <div id="api-banner" class="card hidden">
+      <label for="quick-key">Gemini API Key Required</label>
+      <div class="row">
+        <input id="quick-key" type="password" placeholder="AIza..." />
+        <button id="save-quick-key" class="btn btn-primary" type="button">Save</button>
+      </div>
+      <div class="hint">
+        Stored locally (unencrypted) in your browser profile (<code>chrome.storage.local</code>). Open <b>Settings</b> for security boundary details.
+      </div>
+    </div>
+
+    <div class="card">
+      <label for="input-text">Text</label>
+      <textarea id="input-text" rows="5" placeholder="Type or paste text here..."></textarea>
+      <div class="actions-grid">
+        <button class="btn btn-primary action-btn" data-action="fix" type="button">Fix &amp; Paste</button>
+        <button class="btn action-btn" data-action="professional" type="button">Professional</button>
+        <button class="btn action-btn" id="translate-btn" data-action="translate" type="button">Translate</button>
+        <button class="btn action-btn" data-action="summarize" type="button">Summarize</button>
+      </div>
+      <div id="status" class="status"></div>
+    </div>
+
+    <div id="result-card" class="card hidden">
+      <div class="row-between" style="margin-bottom: 6px;">
+        <label for="output-text" style="margin-bottom: 0;">Result</label>
+        <button id="copy-output" class="link-btn" type="button">Copy</button>
+      </div>
+      <textarea id="output-text" rows="5" readonly></textarea>
+    </div>
+
+    <div class="hint">
+      Tip: Local spellcheck runs automatically at word boundaries. Click the sentence button or right-click selected text → <b>Text AI Tools</b> for Gemini actions.
+    </div>
+
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>

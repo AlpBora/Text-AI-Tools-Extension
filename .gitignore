@@ -1,0 +1,7 @@
+.DS_Store
+.agents/
+node_modules/
+PROJECT.md
+TEST_INFRA.md
+TEST_READY.md
+*.log

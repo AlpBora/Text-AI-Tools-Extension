@@ -1,0 +1,73 @@
+{
+  "manifest_version": 3,
+  "name": "Text AI Tools",
+  "version": "1.1.0",
+  "description": "Offline word-end spellchecking with Turkish morphology & bilingual matching, plus optional Gemini grammar, fluency, translation, and summarization tools.",
+  "permissions": [
+    "contextMenus",
+    "storage",
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://generativelanguage.googleapis.com/*"
+  ],
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Text AI Tools",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "options_page": "options.html",
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "all_frames": true,
+      "match_about_blank": true,
+      "run_at": "document_idle",
+      "js": [
+        "content/language-registry.js",
+        "content/morphology-tr.js",
+        "content/deasciifier-tr.js",
+        "content/spellcheck-engine.js",
+        "content/undo-manager.js",
+        "content/dom-editor.js",
+        "content.js"
+      ]
+    }
+  ],
+  "commands": {
+    "fix": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+U",
+        "mac": "Command+Shift+U"
+      },
+      "description": "Fix & Paste Text"
+    },
+    "professional": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+L",
+        "mac": "Command+Shift+L"
+      },
+      "description": "Make Text Professional"
+    },
+    "translate": {
+      "description": "Translate Text"
+    },
+    "summarize": {
+      "description": "Summarize Text"
+    }
+  }
+}

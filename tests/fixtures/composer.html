@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Realistic Composer Fixture</title>
+    <style>
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        max-width: 780px;
+        margin: 24px auto;
+        padding: 0 16px;
+      }
+      .compose-card {
+        border: 1px solid #d1d5db;
+        border-radius: 10px;
+        padding: 16px;
+      }
+      .field { margin-bottom: 12px; }
+      label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+      input, textarea {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 8px;
+        font-size: 15px;
+      }
+      #rich-body {
+        min-height: 150px;
+        border: 1px solid #cbd5e1;
+        padding: 10px;
+        font-size: 15px;
+        white-space: pre-wrap;
+        outline: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="compose-card">
+      <h2>New Message / Report</h2>
+      <div class="field">
+        <label for="subject-input">Subject</label>
+        <input id="subject-input" type="text" aria-label="Subject" />
+      </div>
+      <div class="field">
+        <label for="recipient-email">To</label>
+        <input id="recipient-email" type="email" aria-label="Recipient Email" />
+      </div>
+      <div class="field">
+        <label for="plain-body">Plain Notes</label>
+        <textarea id="plain-body" rows="6" aria-label="Plain Notes"></textarea>
+      </div>
+      <div class="field">
+        <label for="rich-body">Rich Message Body</label>
+        <div id="rich-body" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Rich Message Body"></div>
+      </div>
+      <div class="field">
+        <label for="reply-iframe">Quoted Reply Frame</label>
+        <iframe id="reply-iframe" src="/iframe-inner.html" width="720" height="220" title="Quoted Reply Frame"></iframe>
+      </div>
+    </div>
+  </body>
+</html>
