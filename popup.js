@@ -13,7 +13,8 @@ export function getShortcutsUrl(
   if (ua.includes("OPR/")) return "opera://extensions/shortcuts";
   if (ua.includes("Edg/")) return "edge://extensions/shortcuts";
   if (ua.includes("Vivaldi/")) return "vivaldi://extensions/shortcuts";
-  return "chrome://extensions/shortcuts";
+  if (/Chrome\/|Chromium\/|Brave\//i.test(ua)) return "chrome://extensions/shortcuts";
+  return null;
 }
 
 function initPopup() {
@@ -31,6 +32,9 @@ function initPopup() {
   const translateBtn = document.getElementById("translate-btn");
   const openOptionsBtn = document.getElementById("open-options");
   const openShortcutsBtn = document.getElementById("open-shortcuts");
+  const shortcutsCard = document.getElementById("shortcuts-card");
+  const shortcutsListEl = document.getElementById("shortcuts-list");
+  const closeShortcutsBtn = document.getElementById("close-shortcuts");
 
   if (!apiBanner || !inputText || !statusEl) return;
 
@@ -126,8 +130,44 @@ function initPopup() {
     chrome.runtime.openOptionsPage();
   });
 
+  closeShortcutsBtn?.addEventListener("click", () => {
+    shortcutsCard?.classList.add("hidden");
+  });
+
+  async function renderInlineShortcuts() {
+    if (!shortcutsCard || !shortcutsListEl) return;
+    shortcutsListEl.textContent = "";
+    let commands = [];
+    try {
+      if (chrome?.commands?.getAll) {
+        commands = await chrome.commands.getAll();
+      }
+    } catch {
+      commands = [];
+    }
+    if (commands.length > 0) {
+      commands.forEach((cmd, idx) => {
+        if (idx > 0) shortcutsListEl.append(document.createElement("br"));
+        const name = cmd.description || (cmd.name === "_execute_action" ? "Open Extension Popup" : cmd.name);
+        const keyText = cmd.shortcut ? cmd.shortcut : "Not set";
+        const strong = document.createElement("b");
+        strong.textContent = `${name}: `;
+        const code = document.createElement("code");
+        code.textContent = keyText;
+        shortcutsListEl.append(strong, code);
+      });
+    } else {
+      shortcutsListEl.textContent = "No custom extension shortcuts configured.";
+    }
+    shortcutsCard.classList.toggle("hidden");
+  }
+
   openShortcutsBtn?.addEventListener("click", async () => {
     const url = getShortcutsUrl();
+    if (!url) {
+      await renderInlineShortcuts();
+      return;
+    }
     try {
       const tab = await chrome.tabs.create({ url, active: true });
       if (tab?.id && !chrome.runtime?.lastError) {
@@ -135,14 +175,9 @@ function initPopup() {
         return;
       }
     } catch {
-      // Some Chromium browsers disallow programmatic navigation to chrome:// URLs
+      // Fallback to inline panel if browser blocks chrome:// URLs
     }
-    try {
-      await navigator.clipboard.writeText(url);
-      setStatus(`Copied ${url} — paste it in the address bar.`, "ok");
-    } catch {
-      setStatus(`Open ${url} in your browser's address bar.`, "err");
-    }
+    await renderInlineShortcuts();
   });
 
   refreshApiBanner();

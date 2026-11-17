@@ -49,8 +49,19 @@
       <textarea id="output-text" rows="5" readonly></textarea>
     </div>
 
+    <div id="shortcuts-card" class="card hidden">
+      <div class="row-between" style="margin-bottom: 6px;">
+        <label style="margin-bottom: 0;">Extension Shortcuts</label>
+        <button id="close-shortcuts" class="link-btn" type="button">Close</button>
+      </div>
+      <div id="shortcuts-list" class="hint" style="margin-bottom: 6px;"></div>
+      <div class="hint">
+        In Orion / Safari-based browsers, <code>chrome://extensions/shortcuts</code> is unavailable. Manage shortcuts in <b>Orion → Settings → Extensions</b> or <b>System Settings → Keyboard Shortcuts</b>.
+      </div>
+    </div>
+
     <div class="hint">
-      Tip: Local spellcheck runs automatically at word boundaries. Click the sentence button or right-click selected text → <b>Text AI Tools</b> for Gemini actions.
+      Tip: Local spellcheck runs automatically at word boundaries. Click the sentence button or right-click selected text → <b>Text AI Tools</b> for AI actions.
     </div>
 
     <script type="module" src="popup.js"></script>

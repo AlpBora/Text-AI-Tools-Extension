@@ -189,6 +189,10 @@ describe("M3 manifest.json & UI contracts", () => {
       getShortcutsUrl("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/157.0.8103.79 Safari/537.36"),
       "chrome://extensions/shortcuts"
     );
+    assert.equal(
+      getShortcutsUrl("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15"),
+      null
+    );
   });
 });
 
