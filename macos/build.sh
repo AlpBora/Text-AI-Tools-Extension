@@ -67,6 +67,40 @@ cat > "$CONTENTS/Info.plist" <<EOF
 </plist>
 EOF
 
-codesign --force --deep --sign - "$APP_BUNDLE" >/dev/null 2>&1 || true
+SIGN_IDENTITY="TextAIToolsMac Local Sign"
+if ! security find-identity -v -p codesigning 2>/dev/null | grep -q "$SIGN_IDENTITY"; then
+  TMP_CERT_DIR="$(mktemp -d)"
+  cat > "$TMP_CERT_DIR/cert.cfg" <<'CERTCFG'
+[ req ]
+default_bits = 2048
+distinguished_name = dn
+x509_extensions = v3_codesign
+prompt = no
+
+[ dn ]
+CN = TextAIToolsMac Local Sign
+
+[ v3_codesign ]
+basicConstraints = CA:FALSE
+keyUsage = digitalSignature
+extendedKeyUsage = codeSigning
+CERTCFG
+  if openssl req -x509 -newkey rsa:2048 -nodes -keyout "$TMP_CERT_DIR/key.pem" -out "$TMP_CERT_DIR/cert.pem" -days 3650 -config "$TMP_CERT_DIR/cert.cfg" >/dev/null 2>&1; then
+    openssl pkcs12 -export -legacy -out "$TMP_CERT_DIR/cert.p12" -inkey "$TMP_CERT_DIR/key.pem" -in "$TMP_CERT_DIR/cert.pem" -passout pass:local >/dev/null 2>&1 \
+      || openssl pkcs12 -export -out "$TMP_CERT_DIR/cert.p12" -inkey "$TMP_CERT_DIR/key.pem" -in "$TMP_CERT_DIR/cert.pem" -passout pass:local >/dev/null 2>&1 \
+      || true
+    if [ -f "$TMP_CERT_DIR/cert.p12" ]; then
+      security import "$TMP_CERT_DIR/cert.p12" -k "$HOME/Library/Keychains/login.keychain-db" -P local -T /usr/bin/codesign -A >/dev/null 2>&1 || true
+      security add-trusted-cert -r trustRoot -k "$HOME/Library/Keychains/login.keychain-db" "$TMP_CERT_DIR/cert.pem" >/dev/null 2>&1 || true
+    fi
+  fi
+  rm -rf "$TMP_CERT_DIR"
+fi
+
+if security find-identity -v -p codesigning 2>/dev/null | grep -q "$SIGN_IDENTITY"; then
+  codesign --force --deep --sign "$SIGN_IDENTITY" "$APP_BUNDLE" >/dev/null 2>&1 || true
+else
+  codesign --force --deep --sign - "$APP_BUNDLE" >/dev/null 2>&1 || true
+fi
 echo "Built: $APP_BUNDLE"
 echo "To launch: open \"$APP_BUNDLE\""
