@@ -503,6 +503,27 @@ describe("M2: Turkish Morphology, Deasciifier, Homographs & Ambiguity Integratio
     assert.equal(hogwartsRes.decision, "auto_correct");
     assert.equal(hogwartsRes.replacement, "Hogwarts'ı");
 
+    const twitterRes = SpellcheckEngine.checkWord({
+      word: "Twitter'in",
+      contextTokens: ["Yanlış"],
+      primaryLang: "tr",
+      secondaryLang: "en",
+      lexiconsByLang: LEXICONS,
+      autoCorrectEnabled: true,
+    });
+    assert.equal(twitterRes.decision, "auto_correct");
+    assert.equal(twitterRes.replacement, "Twitter'ın");
+
+    const omerValid = SpellcheckEngine.checkWord({
+      word: "Ömer'in",
+      contextTokens: ["Bence"],
+      primaryLang: "tr",
+      secondaryLang: "en",
+      lexiconsByLang: LEXICONS,
+      autoCorrectEnabled: true,
+    });
+    assert.equal(omerValid.decision, "valid");
+
     const googleValid = SpellcheckEngine.checkWord({
       word: "Google'da",
       contextTokens: ["bunu"],

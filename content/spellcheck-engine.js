@@ -1172,7 +1172,10 @@
       );
       const isCapitalizedProper = /^\p{Lu}/u.test(rawStem) && rawStem.length >= 2;
       if (!stemHasTrDeasc && (isKnownStem || isCapitalizedProper || (guess.primary === "tr" && rawStem.length >= 3))) {
-        const apoRes = morph.analyzeOrRepairForeignApostrophe(rawStem, rawSuffix);
+        const apoRes = morph.analyzeOrRepairForeignApostrophe(rawStem, rawSuffix, {
+          enExactMap: normLexicons.en?.exactMap,
+          enLexicon: normLexicons.en,
+        });
         if (apoRes.valid) {
           return {
             valid: true,

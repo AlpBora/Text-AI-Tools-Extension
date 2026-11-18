@@ -1492,7 +1492,7 @@
     return [{ valid: false }];
   }
 
-  function getForeignStemPronouncedLastVowel(rawStem) {
+  function getForeignStemPronouncedLastVowel(rawStem, opts = {}) {
     const low = trLower(rawStem);
     if (!low) return "e";
     // Handle silent final -e in English/Latin words (e.g., iPhone -> o, Chrome -> o, YouTube -> u, Google -> o, Apple -> a)
@@ -1505,16 +1505,28 @@
     ) {
       effective = effective.slice(0, -1);
     }
+    // Handle English schwa -er ending pronounced as /ır/ in Turkish (e.g., Twitter'ın, Docker'ın, Browser'da)
+    const isEnglishEr =
+      effective.length >= 5 &&
+      effective.endsWith("er") &&
+      !/[çğıöşüâîû]/.test(effective) &&
+      countVowels(effective) >= 2 &&
+      (/[wqx]/.test(effective) ||
+        Boolean(opts.enExactMap && opts.enExactMap.has(effective)) ||
+        Boolean(opts.enLexicon && opts.enLexicon.words && opts.enLexicon.words[effective]));
+    if (isEnglishEr) {
+      return "ı";
+    }
     return getLastVowel(effective);
   }
 
-  function analyzeOrRepairForeignApostrophe(rawStem, rawSuffix) {
+  function analyzeOrRepairForeignApostrophe(rawStem, rawSuffix, opts = {}) {
     const stemLow = trLower(rawStem);
     const sufLow = trLower(rawSuffix);
     if (!stemLow || !sufLow) return { valid: false, candidates: [] };
     if (!/^[a-zçğıöşüâîû]+$/.test(sufLow)) return { valid: false, candidates: [] };
 
-    const lastVowel = getForeignStemPronouncedLastVowel(rawStem);
+    const lastVowel = getForeignStemPronouncedLastVowel(rawStem, opts);
     const virtualEntry = { stem: stemLow, pos: "P", flags: {} };
 
     // 1. Exact check
