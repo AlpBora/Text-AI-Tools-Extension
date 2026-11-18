@@ -13,6 +13,100 @@ final class InlineActionPanel: NSPanel {
     }
 }
 
+struct GlassThemePreset {
+    let id: String
+    let name: String
+    let topRGB: (CGFloat, CGFloat, CGFloat)
+    let bottomRGB: (CGFloat, CGFloat, CGFloat)
+    let borderRGB: (CGFloat, CGFloat, CGFloat)
+    let primaryRGB: (CGFloat, CGFloat, CGFloat)
+    let hoverRGB: (CGFloat, CGFloat, CGFloat)
+}
+
+enum GlassTheme {
+    static let presets: [GlassThemePreset] = [
+        GlassThemePreset(
+            id: "default",
+            name: "Ocean Turquoise (Default)",
+            topRGB: (0.04, 0.65, 0.78),
+            bottomRGB: (0.04, 0.16, 0.42),
+            borderRGB: (0.35, 0.90, 0.96),
+            primaryRGB: (0.10, 0.72, 0.84),
+            hoverRGB: (0.18, 0.82, 0.90)
+        ),
+        GlassThemePreset(
+            id: "emerald",
+            name: "Neon Emerald",
+            topRGB: (0.10, 0.82, 0.48),
+            bottomRGB: (0.03, 0.24, 0.16),
+            borderRGB: (0.42, 0.98, 0.68),
+            primaryRGB: (0.12, 0.76, 0.45),
+            hoverRGB: (0.22, 0.88, 0.56)
+        ),
+        GlassThemePreset(
+            id: "violet",
+            name: "Electric Violet",
+            topRGB: (0.58, 0.28, 0.92),
+            bottomRGB: (0.14, 0.06, 0.34),
+            borderRGB: (0.76, 0.56, 1.00),
+            primaryRGB: (0.56, 0.30, 0.88),
+            hoverRGB: (0.68, 0.42, 0.96)
+        ),
+        GlassThemePreset(
+            id: "amber",
+            name: "Solar Amber",
+            topRGB: (0.92, 0.62, 0.12),
+            bottomRGB: (0.30, 0.14, 0.04),
+            borderRGB: (1.00, 0.80, 0.38),
+            primaryRGB: (0.88, 0.58, 0.14),
+            hoverRGB: (0.96, 0.70, 0.24)
+        ),
+        GlassThemePreset(
+            id: "rose",
+            name: "Neon Rose",
+            topRGB: (0.90, 0.24, 0.54),
+            bottomRGB: (0.32, 0.05, 0.18),
+            borderRGB: (1.00, 0.52, 0.74),
+            primaryRGB: (0.86, 0.26, 0.54),
+            hoverRGB: (0.95, 0.38, 0.64)
+        ),
+        GlassThemePreset(
+            id: "graphite",
+            name: "Smoked Graphite",
+            topRGB: (0.42, 0.48, 0.56),
+            bottomRGB: (0.10, 0.12, 0.16),
+            borderRGB: (0.72, 0.78, 0.86),
+            primaryRGB: (0.44, 0.50, 0.58),
+            hoverRGB: (0.56, 0.62, 0.70)
+        )
+    ]
+
+    static var themeId: String {
+        get { UserDefaults.standard.string(forKey: "glassThemeId") ?? "default" }
+        set { UserDefaults.standard.set(newValue, forKey: "glassThemeId") }
+    }
+
+    static var opacityScale: CGFloat {
+        get {
+            if UserDefaults.standard.object(forKey: "glassOpacityScale") == nil { return 1.0 }
+            let v = CGFloat(UserDefaults.standard.double(forKey: "glassOpacityScale"))
+            return max(0.30, min(1.0, v))
+        }
+        set {
+            UserDefaults.standard.set(Double(max(0.30, min(1.0, newValue))), forKey: "glassOpacityScale")
+        }
+    }
+
+    static var current: GlassThemePreset {
+        presets.first(where: { $0.id == themeId }) ?? presets[0]
+    }
+
+    static func resetToDefault() {
+        themeId = "default"
+        opacityScale = 1.0
+    }
+}
+
 final class LiquidGlassContainer: NSVisualEffectView {
     private let gradientLayer = CAGradientLayer()
 
@@ -25,16 +119,21 @@ final class LiquidGlassContainer: NSVisualEffectView {
         layer?.cornerRadius = 16
         layer?.masksToBounds = true
         layer?.borderWidth = 1.0
-        layer?.borderColor = NSColor(calibratedRed: 0.35, green: 0.90, blue: 0.96, alpha: 0.38).cgColor
-
-        gradientLayer.colors = [
-            NSColor(calibratedRed: 0.04, green: 0.65, blue: 0.78, alpha: 0.56).cgColor,
-            NSColor(calibratedRed: 0.04, green: 0.16, blue: 0.42, alpha: 0.68).cgColor
-        ]
         gradientLayer.startPoint = CGPoint(x: 0.0, y: 1.0)
         gradientLayer.endPoint = CGPoint(x: 1.0, y: 0.0)
         layer?.insertSublayer(gradientLayer, at: 0)
         maskImage = Self.makeRoundedMaskImage(radius: 16)
+        applyTheme()
+    }
+
+    func applyTheme() {
+        let p = GlassTheme.current
+        let s = GlassTheme.opacityScale
+        layer?.borderColor = NSColor(calibratedRed: p.borderRGB.0, green: p.borderRGB.1, blue: p.borderRGB.2, alpha: 0.38 * max(0.55, s)).cgColor
+        gradientLayer.colors = [
+            NSColor(calibratedRed: p.topRGB.0, green: p.topRGB.1, blue: p.topRGB.2, alpha: 0.56 * s).cgColor,
+            NSColor(calibratedRed: p.bottomRGB.0, green: p.bottomRGB.1, blue: p.bottomRGB.2, alpha: 0.68 * s).cgColor
+        ]
     }
 
     private static func makeRoundedMaskImage(radius: CGFloat) -> NSImage {
@@ -79,15 +178,16 @@ final class GlassActionButton: NSButton {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    private func updateAppearance() {
+    func updateAppearance() {
+        let p = GlassTheme.current
         if isHovered {
-            layer?.backgroundColor = NSColor(calibratedRed: 0.18, green: 0.82, blue: 0.90, alpha: 0.42).cgColor
+            layer?.backgroundColor = NSColor(calibratedRed: p.hoverRGB.0, green: p.hoverRGB.1, blue: p.hoverRGB.2, alpha: 0.42).cgColor
             layer?.borderWidth = 0.8
             layer?.borderColor = NSColor.white.withAlphaComponent(0.45).cgColor
         } else if isPrimaryGlass {
-            layer?.backgroundColor = NSColor(calibratedRed: 0.10, green: 0.72, blue: 0.84, alpha: 0.34).cgColor
+            layer?.backgroundColor = NSColor(calibratedRed: p.primaryRGB.0, green: p.primaryRGB.1, blue: p.primaryRGB.2, alpha: 0.34).cgColor
             layer?.borderWidth = 0.8
-            layer?.borderColor = NSColor(calibratedRed: 0.45, green: 0.94, blue: 0.98, alpha: 0.42).cgColor
+            layer?.borderColor = NSColor(calibratedRed: p.borderRGB.0, green: p.borderRGB.1, blue: p.borderRGB.2, alpha: 0.42).cgColor
         } else {
             layer?.backgroundColor = NSColor.white.withAlphaComponent(0.11).cgColor
             layer?.borderWidth = 0.8
@@ -461,7 +561,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ]
 
         let width: CGFloat = 410
-        let height: CGFloat = 520
+        let height: CGFloat = 556
         let win = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: width, height: height),
             styleMask: [.titled, .closable, .fullSizeContentView],
@@ -479,23 +579,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         glass.autoresizingMask = [.width, .height]
         win.contentView = glass
 
-        func makeLabel(_ text: String, x: CGFloat, y: CGFloat, w: CGFloat, bold: Bool = true, size: CGFloat = 12) -> NSTextField {
+        let tabSeg = NSSegmentedControl(labels: ["General", "Appearance"], trackingMode: .selectOne, target: ActionTarget.shared, action: #selector(ActionTarget.handleClick(_:)))
+        tabSeg.selectedSegment = 0
+        tabSeg.frame = NSRect(x: (width - 210) / 2, y: height - 58, width: 210, height: 26)
+        glass.addSubview(tabSeg)
+
+        let bodyFrame = NSRect(x: 0, y: 0, width: width, height: height - 66)
+        let generalView = NSView(frame: bodyFrame)
+        let appearanceView = NSView(frame: bodyFrame)
+        appearanceView.isHidden = true
+        glass.addSubview(generalView)
+        glass.addSubview(appearanceView)
+
+        ActionTarget.shared.register(button: tabSeg) {
+            let showAppearance = (tabSeg.selectedSegment == 1)
+            generalView.isHidden = showAppearance
+            appearanceView.isHidden = !showAppearance
+        }
+
+        func makeLabel(_ text: String, x: CGFloat, y: CGFloat, w: CGFloat, bold: Bool = true, size: CGFloat = 12, parent: NSView = generalView) -> NSTextField {
             let l = NSTextField(labelWithString: text)
             l.font = NSFont.systemFont(ofSize: size, weight: bold ? .semibold : .regular)
             l.textColor = bold ? .white : NSColor.white.withAlphaComponent(0.75)
             l.frame = NSRect(x: x, y: y, width: w, height: 18)
-            glass.addSubview(l)
+            parent.addSubview(l)
             return l
         }
 
-        var y = height - 56
+        var y = bodyFrame.height - 24
         _ = makeLabel("AI Provider", x: 20, y: y, w: 370)
         y -= 28
         let providerPopup = NSPopUpButton(frame: NSRect(x: 20, y: y, width: 370, height: 26), pullsDown: false)
         for p in providers { providerPopup.addItem(withTitle: p.label) }
         let selectedIdx = providers.firstIndex(where: { $0.id == curProvider }) ?? 0
         providerPopup.selectItem(at: selectedIdx)
-        glass.addSubview(providerPopup)
+        generalView.addSubview(providerPopup)
 
         y -= 26
         let baseUrlLabel = makeLabel("Custom Base URL (OpenAI-Compatible)", x: 20, y: y, w: 370, bold: false, size: 11)
@@ -503,14 +621,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let baseUrlField = NSTextField(frame: NSRect(x: 20, y: y, width: 370, height: 22))
         baseUrlField.placeholderString = "http://localhost:11434/v1"
         baseUrlField.stringValue = curBaseUrl
-        glass.addSubview(baseUrlField)
+        generalView.addSubview(baseUrlField)
 
         y -= 28
         _ = makeLabel("API Key (stored in macOS Keychain)", x: 20, y: y, w: 370)
         y -= 26
         let apiKeyField = NSSecureTextField(frame: NSRect(x: 20, y: y, width: 370, height: 24))
         apiKeyField.placeholderString = hasKey ? "Saved in Keychain — enter new key to replace" : "AIza... / sk-... / sk-or-... / sk-ant-..."
-        glass.addSubview(apiKeyField)
+        generalView.addSubview(apiKeyField)
 
         y -= 28
         _ = makeLabel("AI Model (Proofread, Translate, Summarize…)", x: 20, y: y, w: 370)
@@ -518,7 +636,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let modelBox = NSComboBox(frame: NSRect(x: 20, y: y, width: 370, height: 24))
         modelBox.isEditable = true
         modelBox.completes = true
-        glass.addSubview(modelBox)
+        generalView.addSubview(modelBox)
 
         y -= 28
         _ = makeLabel("Ask AI Model (Q&A / Follow-up — optional)", x: 20, y: y, w: 370)
@@ -527,7 +645,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         askModelBox.isEditable = true
         askModelBox.completes = true
         askModelBox.placeholderString = "Same as above (e.g. gemini-3.8-flash)"
-        glass.addSubview(askModelBox)
+        generalView.addSubview(askModelBox)
 
         func syncProviderModels(resetModel: Bool) {
             let idx = max(0, min(providers.count - 1, providerPopup.indexOfSelectedItem))
@@ -562,10 +680,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         y -= 26
         let primaryField = NSTextField(frame: NSRect(x: 20, y: y, width: 175, height: 24))
         primaryField.stringValue = curPrimary
-        glass.addSubview(primaryField)
+        generalView.addSubview(primaryField)
         let secondaryField = NSTextField(frame: NSRect(x: 215, y: y, width: 175, height: 24))
         secondaryField.stringValue = curSecondary
-        glass.addSubview(secondaryField)
+        generalView.addSubview(secondaryField)
 
         y -= 32
         _ = makeLabel("Global Shortcut", x: 20, y: y, w: 120)
@@ -578,23 +696,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ActionTarget.shared.register(button: changeHkBtn) { [weak self] in
             self?.openShortcutRecorder()
         }
-        glass.addSubview(changeHkBtn)
+        generalView.addSubview(changeHkBtn)
 
         y -= 32
         let skipCb = NSButton(checkboxWithTitle: "Skip Chromium/Orion Browsers (Use Browser Extension)", target: nil, action: nil)
         skipCb.frame = NSRect(x: 20, y: y, width: 370, height: 20)
         skipCb.state = skipBrowsers ? .on : .off
         skipCb.contentTintColor = .white
-        glass.addSubview(skipCb)
+        generalView.addSubview(skipCb)
 
         y -= 24
         let autoUpdCb = NSButton(checkboxWithTitle: "Auto-Update in Background (5m local / 1h GitHub)", target: nil, action: nil)
         autoUpdCb.frame = NSRect(x: 20, y: y, width: 370, height: 20)
         autoUpdCb.state = autoUpdateEnabled ? .on : .off
         autoUpdCb.contentTintColor = .white
-        glass.addSubview(autoUpdCb)
+        generalView.addSubview(autoUpdCb)
 
-        y -= 32
+        y -= 30
         let statusLbl = makeLabel("", x: 20, y: y, w: 370, bold: false, size: 11.5)
 
         let permBtn = GlassActionButton(frame: NSRect(x: 20, y: 18, width: 110, height: 28))
@@ -604,7 +722,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ActionTarget.shared.register(button: permBtn) { [weak self] in
             self?.checkAccessibility()
         }
-        glass.addSubview(permBtn)
+        generalView.addSubview(permBtn)
 
         let updBtn = GlassActionButton(frame: NSRect(x: 138, y: 18, width: 124, height: 28))
         updBtn.title = "  Check Updates"
@@ -613,7 +731,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ActionTarget.shared.register(button: updBtn) { [weak self] in
             self?.manualCheckForUpdates()
         }
-        glass.addSubview(updBtn)
+        generalView.addSubview(updBtn)
 
         let saveBtn = GlassActionButton(frame: NSRect(x: 270, y: 18, width: 120, height: 28))
         saveBtn.title = "  Save Settings"
@@ -653,7 +771,104 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             _ = self.worker.sendSync(payload, timeoutMs: 1200)
             statusLbl.stringValue = "Settings saved ✓"
         }
-        glass.addSubview(saveBtn)
+        generalView.addSubview(saveBtn)
+
+        // --- Appearance Tab ---
+        var ay = bodyFrame.height - 28
+        _ = makeLabel("Color Theme (Fixed Liquid-Glass Gradient)", x: 20, y: ay, w: 370, parent: appearanceView)
+        ay -= 22
+        _ = makeLabel("All themes preserve the same bright-to-deep liquid glass gradient.", x: 20, y: ay, w: 370, bold: false, size: 11, parent: appearanceView)
+
+        var themeButtons: [(id: String, btn: NSButton)] = []
+        let opacityValueLbl = makeLabel("\(Int(round(GlassTheme.opacityScale * 100)))%", x: 330, y: bodyFrame.height - 266, w: 60, bold: true, size: 12, parent: appearanceView)
+        opacityValueLbl.alignment = .right
+
+        let opacitySlider = NSSlider(value: Double(GlassTheme.opacityScale), minValue: 0.30, maxValue: 1.00, target: ActionTarget.shared, action: #selector(ActionTarget.handleClick(_:)))
+        opacitySlider.isContinuous = true
+        opacitySlider.frame = NSRect(x: 20, y: bodyFrame.height - 294, width: 370, height: 22)
+        appearanceView.addSubview(opacitySlider)
+
+        func refreshLiveGlass() {
+            glass.applyTheme()
+            for v in [generalView, appearanceView] {
+                for sub in v.subviews {
+                    if let gb = sub as? GlassActionButton {
+                        gb.updateAppearance()
+                    }
+                }
+            }
+            for item in themeButtons {
+                let selected = (item.id == GlassTheme.themeId)
+                item.btn.layer?.borderWidth = selected ? 2.0 : 0.8
+                item.btn.layer?.borderColor = selected
+                    ? NSColor.white.cgColor
+                    : NSColor.white.withAlphaComponent(0.28).cgColor
+            }
+            opacitySlider.doubleValue = Double(GlassTheme.opacityScale)
+            opacityValueLbl.stringValue = "\(Int(round(GlassTheme.opacityScale * 100)))%"
+        }
+
+        ay -= 42
+        let colW: CGFloat = 179
+        let rowH: CGFloat = 46
+        for (idx, preset) in GlassTheme.presets.enumerated() {
+            let col = idx % 2
+            let row = idx / 2
+            let bx = 20 + CGFloat(col) * (colW + 12)
+            let by = ay - CGFloat(row) * (rowH + 10)
+            let swatch = NSButton(frame: NSRect(x: bx, y: by, width: colW, height: rowH))
+            swatch.isBordered = false
+            swatch.wantsLayer = true
+            swatch.layer?.cornerRadius = 10
+            swatch.layer?.masksToBounds = true
+            let grad = CAGradientLayer()
+            grad.frame = swatch.bounds
+            grad.colors = [
+                NSColor(calibratedRed: preset.topRGB.0, green: preset.topRGB.1, blue: preset.topRGB.2, alpha: 0.85).cgColor,
+                NSColor(calibratedRed: preset.bottomRGB.0, green: preset.bottomRGB.1, blue: preset.bottomRGB.2, alpha: 0.92).cgColor
+            ]
+            grad.startPoint = CGPoint(x: 0.0, y: 1.0)
+            grad.endPoint = CGPoint(x: 1.0, y: 0.0)
+            swatch.layer?.insertSublayer(grad, at: 0)
+            let para = NSMutableParagraphStyle()
+            para.alignment = .center
+            swatch.attributedTitle = NSAttributedString(
+                string: preset.name,
+                attributes: [
+                    .foregroundColor: NSColor.white,
+                    .font: NSFont.systemFont(ofSize: 11.5, weight: .semibold),
+                    .paragraphStyle: para
+                ]
+            )
+            swatch.target = ActionTarget.shared
+            swatch.action = #selector(ActionTarget.handleClick(_:))
+            ActionTarget.shared.register(button: swatch) {
+                GlassTheme.themeId = preset.id
+                refreshLiveGlass()
+            }
+            appearanceView.addSubview(swatch)
+            themeButtons.append((preset.id, swatch))
+        }
+
+        _ = makeLabel("Liquid Glass Strength (Opacity)", x: 20, y: bodyFrame.height - 266, w: 300, parent: appearanceView)
+        _ = makeLabel("Lower = more transparent glass, higher = deeper color tint.", x: 20, y: bodyFrame.height - 318, w: 370, bold: false, size: 11, parent: appearanceView)
+
+        ActionTarget.shared.register(button: opacitySlider) {
+            GlassTheme.opacityScale = CGFloat(opacitySlider.doubleValue)
+            refreshLiveGlass()
+        }
+
+        let resetBtn = GlassActionButton(frame: NSRect(x: 20, y: 18, width: 170, height: 28))
+        resetBtn.title = "  Reset to Default"
+        resetBtn.target = ActionTarget.shared
+        resetBtn.action = #selector(ActionTarget.handleClick(_:))
+        ActionTarget.shared.register(button: resetBtn) {
+            GlassTheme.resetToDefault()
+            refreshLiveGlass()
+        }
+        appearanceView.addSubview(resetBtn)
+
+        refreshLiveGlass()
 
         settingsWindow = win
         NSApp.activate(ignoringOtherApps: true)
