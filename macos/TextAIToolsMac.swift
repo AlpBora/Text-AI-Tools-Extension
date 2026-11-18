@@ -285,10 +285,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let boundaryChars: Set<Character> = [" ", "\n", "\r", ".", ",", "!", "?", ";", ":"]
 
     private var toggleItem: NSMenuItem!
-    private var skipBrowsersItem: NSMenuItem!
+    private var skipBrowsersItem: NSMenuItem?
     private var statusMenuItem: NSMenuItem!
-    private var hotkeyMenuItem: NSMenuItem!
-    private var autoUpdateItem: NSMenuItem!
+    private var hotkeyMenuItem: NSMenuItem?
+    private var autoUpdateItem: NSMenuItem?
+    private var settingsWindow: NSWindow?
+    private var settingsShortcutLabel: NSTextField?
     private var retryTimer: Timer?
     private var updateTimer: Timer?
     private var lastRemoteFetchAt: Date = .distantPast
@@ -416,24 +418,219 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         toggleItem.state = .on
         menu.addItem(toggleItem)
 
-        skipBrowsersItem = NSMenuItem(title: "Skip Chrome/Opera (Use Browser Extension)", action: #selector(toggleSkipBrowsers), keyEquivalent: "")
-        skipBrowsersItem.state = .on
-        menu.addItem(skipBrowsersItem)
-
         menu.addItem(NSMenuItem.separator())
-        hotkeyMenuItem = NSMenuItem(title: "Shortcut: \(hotkey.label) (Change…)", action: #selector(openShortcutRecorder), keyEquivalent: "")
-        menu.addItem(hotkeyMenuItem)
-        menu.addItem(NSMenuItem(title: "Set Gemini API Key…", action: #selector(promptApiKey), keyEquivalent: ""))
-        menu.addItem(NSMenuItem(title: "Check / Retry Permissions", action: #selector(checkAccessibility), keyEquivalent: ""))
-        menu.addItem(NSMenuItem.separator())
-        autoUpdateItem = NSMenuItem(title: "Auto-Update in Background", action: #selector(toggleAutoUpdate), keyEquivalent: "")
-        autoUpdateItem.state = autoUpdateEnabled ? .on : .off
-        menu.addItem(autoUpdateItem)
-        menu.addItem(NSMenuItem(title: "Check for Updates / Rebuild Now", action: #selector(manualCheckForUpdates), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "Settings…", action: #selector(openSettingsWindow), keyEquivalent: ","))
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(quitApp), keyEquivalent: "q"))
 
         statusItem.menu = menu
+    }
+
+    @objc private func openSettingsWindow() {
+        if let existing = settingsWindow {
+            existing.close()
+            settingsWindow = nil
+        }
+
+        let cfgResp = worker.sendSync(["type": "getConfig"], timeoutMs: 800)
+        let cfg = (cfgResp?["config"] as? [String: Any]) ?? [:]
+        let curProvider = (cfg["provider"] as? String) ?? "gemini"
+        let curModel = (cfg["model"] as? String) ?? "gemini-3.5-flash-lite"
+        let curBaseUrl = (cfg["customBaseUrl"] as? String) ?? ""
+        let curPrimary = (cfg["primaryLanguage"] as? String) ?? "Turkish"
+        let curSecondary = (cfg["secondaryLanguage"] as? String) ?? "English"
+        let hasKey = (cfg["hasApiKey"] as? Bool) ?? false
+
+        let providers: [(id: String, label: String, models: [String])] = [
+            ("gemini", "Google Gemini", ["gemini-3.5-flash-lite", "gemini-3.8-flash", "gemini-flash-lite-latest"]),
+            ("openai", "OpenAI", ["gpt-4.1-mini", "gpt-4.1-nano", "gpt-4o-mini", "o4-mini"]),
+            ("anthropic", "Anthropic (Claude)", ["claude-3-5-haiku-latest", "claude-sonnet-4-0", "claude-3-7-sonnet-latest"]),
+            ("openrouter", "OpenRouter", ["openrouter/free", "meta-llama/llama-3.3-70b-instruct:free", "google/gemma-3-27b-it:free", "qwen/qwen3-32b:free"]),
+            ("groq", "Groq", ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]),
+            ("custom", "Custom / Local (OpenAI-Compatible)", ["llama3.2", "qwen2.5:7b", "gemma3"])
+        ]
+
+        let width: CGFloat = 410
+        let height: CGFloat = 468
+        let win = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: width, height: height),
+            styleMask: [.titled, .closable, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+        win.title = "Text AI Tools — Settings"
+        win.titlebarAppearsTransparent = true
+        win.isOpaque = false
+        win.backgroundColor = .clear
+        win.isReleasedWhenClosed = false
+        win.center()
+
+        let glass = LiquidGlassContainer(frame: NSRect(x: 0, y: 0, width: width, height: height))
+        glass.autoresizingMask = [.width, .height]
+        win.contentView = glass
+
+        func makeLabel(_ text: String, x: CGFloat, y: CGFloat, w: CGFloat, bold: Bool = true, size: CGFloat = 12) -> NSTextField {
+            let l = NSTextField(labelWithString: text)
+            l.font = NSFont.systemFont(ofSize: size, weight: bold ? .semibold : .regular)
+            l.textColor = bold ? .white : NSColor.white.withAlphaComponent(0.75)
+            l.frame = NSRect(x: x, y: y, width: w, height: 18)
+            glass.addSubview(l)
+            return l
+        }
+
+        var y = height - 56
+        _ = makeLabel("AI Provider", x: 20, y: y, w: 370)
+        y -= 28
+        let providerPopup = NSPopUpButton(frame: NSRect(x: 20, y: y, width: 370, height: 26), pullsDown: false)
+        for p in providers { providerPopup.addItem(withTitle: p.label) }
+        let selectedIdx = providers.firstIndex(where: { $0.id == curProvider }) ?? 0
+        providerPopup.selectItem(at: selectedIdx)
+        glass.addSubview(providerPopup)
+
+        y -= 26
+        let baseUrlLabel = makeLabel("Custom Base URL (OpenAI-Compatible)", x: 20, y: y, w: 370, bold: false, size: 11)
+        y -= 24
+        let baseUrlField = NSTextField(frame: NSRect(x: 20, y: y, width: 370, height: 22))
+        baseUrlField.placeholderString = "http://localhost:11434/v1"
+        baseUrlField.stringValue = curBaseUrl
+        glass.addSubview(baseUrlField)
+
+        y -= 28
+        _ = makeLabel("API Key (stored in macOS Keychain)", x: 20, y: y, w: 370)
+        y -= 26
+        let apiKeyField = NSSecureTextField(frame: NSRect(x: 20, y: y, width: 370, height: 24))
+        apiKeyField.placeholderString = hasKey ? "Saved in Keychain — enter new key to replace" : "AIza... / sk-... / sk-or-... / sk-ant-..."
+        glass.addSubview(apiKeyField)
+
+        y -= 28
+        _ = makeLabel("AI Model", x: 20, y: y, w: 370)
+        y -= 26
+        let modelBox = NSComboBox(frame: NSRect(x: 20, y: y, width: 370, height: 24))
+        modelBox.isEditable = true
+        modelBox.completes = true
+        glass.addSubview(modelBox)
+
+        func syncProviderModels(resetModel: Bool) {
+            let idx = max(0, min(providers.count - 1, providerPopup.indexOfSelectedItem))
+            let p = providers[idx]
+            modelBox.removeAllItems()
+            modelBox.addItems(withObjectValues: p.models)
+            if resetModel || modelBox.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                modelBox.stringValue = p.models.first ?? ""
+            }
+            let isCustom = (p.id == "custom")
+            baseUrlLabel.alphaValue = isCustom ? 1.0 : 0.45
+            baseUrlField.isEnabled = isCustom
+        }
+        modelBox.stringValue = curModel
+        syncProviderModels(resetModel: false)
+
+        providerPopup.target = ActionTarget.shared
+        providerPopup.action = #selector(ActionTarget.handleClick(_:))
+        ActionTarget.shared.register(button: providerPopup) {
+            syncProviderModels(resetModel: true)
+        }
+
+        y -= 30
+        _ = makeLabel("Primary Language", x: 20, y: y, w: 175)
+        _ = makeLabel("Secondary Language", x: 215, y: y, w: 175)
+        y -= 26
+        let primaryField = NSTextField(frame: NSRect(x: 20, y: y, width: 175, height: 24))
+        primaryField.stringValue = curPrimary
+        glass.addSubview(primaryField)
+        let secondaryField = NSTextField(frame: NSRect(x: 215, y: y, width: 175, height: 24))
+        secondaryField.stringValue = curSecondary
+        glass.addSubview(secondaryField)
+
+        y -= 32
+        _ = makeLabel("Global Shortcut", x: 20, y: y, w: 120)
+        let shortcutVal = makeLabel(hotkey.label, x: 145, y: y, w: 145, bold: false, size: 12)
+        settingsShortcutLabel = shortcutVal
+        let changeHkBtn = GlassActionButton(frame: NSRect(x: 298, y: y - 4, width: 92, height: 24))
+        changeHkBtn.title = "  Change…"
+        changeHkBtn.target = ActionTarget.shared
+        changeHkBtn.action = #selector(ActionTarget.handleClick(_:))
+        ActionTarget.shared.register(button: changeHkBtn) { [weak self] in
+            self?.openShortcutRecorder()
+        }
+        glass.addSubview(changeHkBtn)
+
+        y -= 32
+        let skipCb = NSButton(checkboxWithTitle: "Skip Chromium/Orion Browsers (Use Browser Extension)", target: nil, action: nil)
+        skipCb.frame = NSRect(x: 20, y: y, width: 370, height: 20)
+        skipCb.state = skipBrowsers ? .on : .off
+        skipCb.contentTintColor = .white
+        glass.addSubview(skipCb)
+
+        y -= 24
+        let autoUpdCb = NSButton(checkboxWithTitle: "Auto-Update in Background (5m local / 1h GitHub)", target: nil, action: nil)
+        autoUpdCb.frame = NSRect(x: 20, y: y, width: 370, height: 20)
+        autoUpdCb.state = autoUpdateEnabled ? .on : .off
+        autoUpdCb.contentTintColor = .white
+        glass.addSubview(autoUpdCb)
+
+        y -= 32
+        let statusLbl = makeLabel("", x: 20, y: y, w: 370, bold: false, size: 11.5)
+
+        let permBtn = GlassActionButton(frame: NSRect(x: 20, y: 18, width: 110, height: 28))
+        permBtn.title = "  Permissions"
+        permBtn.target = ActionTarget.shared
+        permBtn.action = #selector(ActionTarget.handleClick(_:))
+        ActionTarget.shared.register(button: permBtn) { [weak self] in
+            self?.checkAccessibility()
+        }
+        glass.addSubview(permBtn)
+
+        let updBtn = GlassActionButton(frame: NSRect(x: 138, y: 18, width: 124, height: 28))
+        updBtn.title = "  Check Updates"
+        updBtn.target = ActionTarget.shared
+        updBtn.action = #selector(ActionTarget.handleClick(_:))
+        ActionTarget.shared.register(button: updBtn) { [weak self] in
+            self?.manualCheckForUpdates()
+        }
+        glass.addSubview(updBtn)
+
+        let saveBtn = GlassActionButton(frame: NSRect(x: 270, y: 18, width: 120, height: 28))
+        saveBtn.title = "  Save Settings"
+        saveBtn.isPrimaryGlass = true
+        saveBtn.target = ActionTarget.shared
+        saveBtn.action = #selector(ActionTarget.handleClick(_:))
+        ActionTarget.shared.register(button: saveBtn) { [weak self] in
+            guard let self = self else { return }
+            let idx = max(0, min(providers.count - 1, providerPopup.indexOfSelectedItem))
+            let chosenProvider = providers[idx].id
+            let chosenModel = modelBox.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            let chosenBase = baseUrlField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            let newKey = apiKeyField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            let pLang = primaryField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            let sLang = secondaryField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            self.skipBrowsers = (skipCb.state == .on)
+            self.autoUpdateEnabled = (autoUpdCb.state == .on)
+            UserDefaults.standard.set(self.autoUpdateEnabled, forKey: "autoUpdateEnabled")
+            if self.autoUpdateEnabled { self.startAutoUpdateLoop() } else { self.updateTimer?.invalidate(); self.updateTimer = nil }
+
+            var payload: [String: Any] = [
+                "type": "setConfig",
+                "provider": chosenProvider,
+                "customBaseUrl": chosenBase,
+                "model": chosenModel.isEmpty ? (providers[idx].models.first ?? "gemini-3.5-flash-lite") : chosenModel,
+                "primaryLanguage": pLang.isEmpty ? "Turkish" : pLang,
+                "secondaryLanguage": sLang.isEmpty ? "English" : sLang
+            ]
+            if !newKey.isEmpty {
+                payload["apiKey"] = newKey
+                apiKeyField.stringValue = ""
+                apiKeyField.placeholderString = "Saved in Keychain ✓"
+            }
+            _ = self.worker.sendSync(payload, timeoutMs: 1200)
+            statusLbl.stringValue = "Settings saved ✓"
+        }
+        glass.addSubview(saveBtn)
+
+        settingsWindow = win
+        NSApp.activate(ignoringOtherApps: true)
+        win.makeKeyAndOrderFront(nil)
     }
 
     @objc private func toggleAutoCorrect() {
@@ -446,7 +643,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func toggleSkipBrowsers() {
         skipBrowsers.toggle()
-        skipBrowsersItem.state = skipBrowsers ? .on : .off
+        skipBrowsersItem?.state = skipBrowsers ? .on : .off
         wordBuffer = ""
     }
 
@@ -512,7 +709,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func toggleAutoUpdate() {
         autoUpdateEnabled.toggle()
         UserDefaults.standard.set(autoUpdateEnabled, forKey: "autoUpdateEnabled")
-        autoUpdateItem.state = autoUpdateEnabled ? .on : .off
+        autoUpdateItem?.state = autoUpdateEnabled ? .on : .off
         if autoUpdateEnabled {
             startAutoUpdateLoop()
         } else {
@@ -1420,6 +1617,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func saveHotkey(_ next: HotkeyConfig) {
         self.hotkey = next
         self.hotkeyMenuItem?.title = "Shortcut: \(next.label) (Change…)"
+        self.settingsShortcutLabel?.stringValue = next.label
         let dict: [String: Any] = [
             "keyCode": Int(next.keyCode),
             "cmd": next.cmd,

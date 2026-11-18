@@ -383,7 +383,6 @@ export async function handleRuntimeMessage(msg, sender) {
 
 const REMOTE_MANIFEST_URL =
   "https://raw.githubusercontent.com/AlpBora/Text-AI-Tools-Extension/main/manifest.json";
-const UPDATE_ALARM_NAME = "text-ai-tools-update-check";
 
 export function compareVersions(a, b) {
   const pa = String(a || "").split(".").map((n) => parseInt(n, 10) || 0);
