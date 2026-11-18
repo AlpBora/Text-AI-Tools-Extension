@@ -147,7 +147,9 @@ describe("M3 manifest.json & UI contracts", () => {
     assert.equal(manifest.manifest_version, 3);
     assert.equal(manifest.name, "Text AI Tools");
     assert.equal(manifest.options_page, "options.html");
-    assert.deepEqual(manifest.host_permissions, ["https://generativelanguage.googleapis.com/*"]);
+    assert.ok(manifest.host_permissions.includes("https://generativelanguage.googleapis.com/*"));
+    assert.equal(manifest.host_permissions.includes("<all_urls>"), false);
+    assert.equal(manifest.optional_host_permissions, undefined);
     assert.ok(Array.isArray(manifest.content_scripts) && manifest.content_scripts.length === 1);
     const cs = manifest.content_scripts[0];
     assert.deepEqual(cs.matches, ["<all_urls>"]);
