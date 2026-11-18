@@ -1,5 +1,6 @@
 import {
   ACTIONS,
+  askAIQuestion,
   callAI,
   fetchContextualWordSuggestions,
   fetchSentenceSuggestions,
@@ -328,6 +329,33 @@ export async function handleRuntimeMessage(msg, sender) {
     }
   }
 
+  if (msg.type === "askAIQuestion") {
+    const settings = await getSettings();
+    const providerCfg = resolveProviderConfig(settings.provider, settings.customBaseUrl);
+    if (providerCfg.requiresKey && !settings.apiKey) {
+      return {
+        ok: false,
+        error: `Please set your ${providerCfg.label} API key in Settings first.`,
+        openOptions: true
+      };
+    }
+    try {
+      const result = await askAIQuestion({
+        question: msg.question,
+        text: msg.text,
+        primaryLanguage: msg.primaryLang || settings.primaryLanguage,
+        secondaryLanguage: msg.secondaryLang || settings.secondaryLanguage,
+        provider: settings.provider,
+        customBaseUrl: settings.customBaseUrl,
+        apiKey: settings.apiKey,
+        model: settings.model
+      });
+      return { ok: true, result };
+    } catch (err) {
+      return { ok: false, error: err?.message || String(err) };
+    }
+  }
+
   if (msg.type === "openOptions") {
     chrome.runtime.openOptionsPage();
     return { ok: true };
@@ -451,6 +479,7 @@ export function registerListeners() {
       "geminiInlineAction",
       "geminiSentenceSuggestions",
       "geminiContextualWord",
+      "askAIQuestion",
       "relayModalToTopFrame",
       "checkAndReloadUpdate"
     ]);

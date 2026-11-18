@@ -353,8 +353,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func startMouseMonitor() {
         mouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
-            self?.wordBuffer = ""
-            self?.lastUndo = nil
+            guard let self = self else { return }
+            self.wordBuffer = ""
+            self.lastUndo = nil
+            DispatchQueue.main.async {
+                if let panel = self.actionPanel, panel.isVisible {
+                    panel.close()
+                    self.actionPanel = nil
+                }
+            }
         }
     }
 
@@ -1081,7 +1088,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func showActionMenuPanel(selectedText: String, previousClipboard: String?, anchorRect: NSRect?) {
         actionPanel?.close()
         let width: CGFloat = 228
-        let height: CGFloat = 227
+        let height: CGFloat = 260
         let panel = createPanel(width: width, height: height, anchorRect: anchorRect)
         guard let contentView = panel.contentView else { return }
         addGlassHeader(to: contentView, width: width, height: height, panel: panel)
@@ -1117,9 +1124,65 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             curY -= 31
         }
 
+        let askField = NSTextField(frame: NSRect(x: 10, y: 10, width: width - 20, height: 24))
+        askField.placeholderString = "Ask AI about this… (↵)"
+        askField.font = NSFont.systemFont(ofSize: 11.5)
+        askField.textColor = .white
+        askField.drawsBackground = true
+        askField.backgroundColor = NSColor(calibratedRed: 0.02, green: 0.07, blue: 0.16, alpha: 0.55)
+        askField.isBezeled = true
+        askField.bezelStyle = .roundedBezel
+        askField.focusRingType = .none
+        askField.target = ActionTarget.shared
+        askField.action = #selector(ActionTarget.handleClick(_:))
+        ActionTarget.shared.register(button: askField) { [weak self, weak panel, weak askField] in
+            guard let self = self, let panel = panel, let askField = askField else { return }
+            let q = askField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !q.isEmpty else { return }
+            self.executePanelQuestion(
+                question: q,
+                selectedText: selectedText,
+                previousClipboard: previousClipboard,
+                panel: panel
+            )
+        }
+        contentView.addSubview(askField)
+
         NSApp.activate(ignoringOtherApps: true)
         panel.makeKeyAndOrderFront(nil)
         actionPanel = panel
+    }
+
+    private func executePanelQuestion(
+        question: String,
+        selectedText: String,
+        previousClipboard: String?,
+        panel: InlineActionPanel
+    ) {
+        panel.contentView?.subviews.forEach { $0.removeFromSuperview() }
+        if let cv = panel.contentView {
+            addGlassHeader(to: cv, width: panel.frame.width, height: panel.frame.height, panel: panel)
+            let statusLbl = NSTextField(labelWithString: "Thinking…")
+            statusLbl.font = NSFont.systemFont(ofSize: 12, weight: .medium)
+            statusLbl.textColor = .white
+            statusLbl.alignment = .center
+            statusLbl.frame = NSRect(x: 12, y: (panel.frame.height - 28) / 2, width: panel.frame.width - 24, height: 20)
+            cv.addSubview(statusLbl)
+        }
+
+        worker.sendAsync(["type": "askAIQuestion", "question": question, "text": selectedText]) { [weak self] resp in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                let ok = (resp["ok"] as? Bool) ?? false
+                if !ok {
+                    let err = (resp["error"] as? String) ?? "Request failed."
+                    self.showPanelResult(text: err, isError: true, previousClipboard: previousClipboard, panel: panel, keepSize: true)
+                    return
+                }
+                let resultText = ((resp["result"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                self.showPanelResult(text: resultText, isError: false, previousClipboard: previousClipboard, panel: panel, keepSize: true)
+            }
+        }
     }
 
     private func executePanelAction(
@@ -1200,12 +1263,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func showPanelResult(text: String, isError: Bool, previousClipboard: String?, panel: InlineActionPanel) {
-        let newWidth: CGFloat = 330
-        let newHeight: CGFloat = 200
-        var frame = panel.frame
-        frame.size = NSSize(width: newWidth, height: newHeight)
-        panel.setFrame(frame, display: true)
+    private func showPanelResult(text: String, isError: Bool, previousClipboard: String?, panel: InlineActionPanel, keepSize: Bool = false) {
+        let newWidth: CGFloat = keepSize ? panel.frame.width : 330
+        let newHeight: CGFloat = keepSize ? panel.frame.height : 200
+        if !keepSize {
+            var frame = panel.frame
+            frame.size = NSSize(width: newWidth, height: newHeight)
+            panel.setFrame(frame, display: true)
+        }
         guard let contentView = panel.contentView else { return }
         contentView.subviews.forEach { $0.removeFromSuperview() }
         addGlassHeader(to: contentView, width: newWidth, height: newHeight, panel: panel)
@@ -1383,11 +1448,11 @@ final class ActionTarget: NSObject {
     static let shared = ActionTarget()
     private var handlers: [ObjectIdentifier: () -> Void] = [:]
 
-    func register(button: NSButton, handler: @escaping () -> Void) {
+    func register(button: NSControl, handler: @escaping () -> Void) {
         handlers[ObjectIdentifier(button)] = handler
     }
 
-    @objc func handleClick(_ sender: NSButton) {
+    @objc func handleClick(_ sender: NSControl) {
         handlers[ObjectIdentifier(sender)]?()
     }
 }

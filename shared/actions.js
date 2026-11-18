@@ -596,3 +596,36 @@ export async function fetchContextualWordSuggestions({
 
   return { suggestions };
 }
+
+export async function askAIQuestion({
+  question,
+  text,
+  primaryLanguage = DEFAULT_PRIMARY_LANGUAGE,
+  secondaryLanguage = DEFAULT_SECONDARY_LANGUAGE,
+  provider = DEFAULT_PROVIDER,
+  customBaseUrl = "",
+  apiKey,
+  model,
+  retryBaseDelayMs = 2000
+}) {
+  const cleanQ = String(question || "").trim();
+  const cleanText = String(text || "").trim();
+  if (!cleanQ) {
+    throw new GeminiRequestError("Please enter a question first.", { retryable: false });
+  }
+  if (!cleanText) {
+    throw new GeminiRequestError("Select or enter some text first.", { retryable: false });
+  }
+  const primary = (primaryLanguage || DEFAULT_PRIMARY_LANGUAGE).trim() || DEFAULT_PRIMARY_LANGUAGE;
+  const systemPrompt = `You are a concise, helpful assistant. Answer the user's question about the provided text clearly and briefly (in ${primary} if the question is in ${primary}, otherwise match the question's language).`;
+  const userText = `Text:\n${cleanText}\n\nQuestion:\n${cleanQ}`;
+  return requestAI({
+    provider,
+    customBaseUrl,
+    apiKey,
+    model,
+    systemPrompt,
+    userText,
+    retryBaseDelayMs
+  });
+}

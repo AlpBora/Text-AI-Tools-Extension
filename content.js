@@ -525,6 +525,54 @@
           border-color: rgba(255, 255, 255, 0.58);
           color: #ffffff;
         }
+        .ask-form {
+          display: flex;
+          gap: 5px;
+          margin-top: 6px;
+          padding-top: 6px;
+          border-top: 1px solid rgba(255, 255, 255, 0.16);
+        }
+        .ask-input {
+          flex: 1;
+          min-width: 0;
+          background: rgba(5, 16, 36, 0.45);
+          color: #ffffff;
+          border: 1px solid rgba(255, 255, 255, 0.22);
+          border-radius: 8px;
+          padding: 5px 8px;
+          font-size: 11.5px;
+          outline: none;
+        }
+        .ask-input::placeholder {
+          color: rgba(255, 255, 255, 0.55);
+        }
+        .ask-input:focus {
+          border-color: rgba(115, 240, 250, 0.65);
+        }
+        .ask-send {
+          background: rgba(25, 184, 214, 0.45);
+          color: #ffffff;
+          border: 1px solid rgba(115, 240, 250, 0.45);
+          border-radius: 8px;
+          padding: 0 9px;
+          font-size: 12px;
+          font-weight: 700;
+          cursor: pointer;
+        }
+        .ask-answer {
+          font-size: 12px;
+          line-height: 1.45;
+          color: #f0f9ff;
+          max-height: 150px;
+          overflow-y: auto;
+          white-space: pre-wrap;
+          word-break: break-word;
+          margin-bottom: 8px;
+        }
+        .ask-answer-actions {
+          display: flex;
+          gap: 6px;
+        }
         .action-btn-secondary {
           background: rgba(255, 255, 255, 0.08);
           color: rgba(255, 255, 255, 0.85);
@@ -1597,6 +1645,68 @@
     }
 
     bodyContainer.appendChild(grid);
+
+    const askForm = document.createElement("form");
+    askForm.className = "ask-form";
+    const askInput = document.createElement("input");
+    askInput.type = "text";
+    askInput.className = "ask-input";
+    askInput.placeholder = "Ask AI about this…";
+    const askSend = document.createElement("button");
+    askSend.type = "submit";
+    askSend.className = "ask-send";
+    askSend.textContent = "→";
+    askForm.appendChild(askInput);
+    askForm.appendChild(askSend);
+
+    askForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const q = askInput.value.trim();
+      if (!q) return;
+      bodyContainer.innerHTML = `<div class="loading-row"><div class="spinner"></div><span>Thinking…</span></div>`;
+      try {
+        const res = await chrome.runtime.sendMessage({
+          type: "askAIQuestion",
+          question: q,
+          text: extraction.text,
+          primaryLang: settings.primaryLanguage,
+          secondaryLang: settings.secondaryLanguage
+        });
+        if (!res?.ok) {
+          bodyContainer.innerHTML = `<div class="ask-answer" style="color:#fecaca;">${escapeHtml(res?.error || "Request failed.")}</div>`;
+          return;
+        }
+        bodyContainer.innerHTML = "";
+        const ans = document.createElement("div");
+        ans.className = "ask-answer";
+        ans.textContent = (res.result || "").trim();
+        const row = document.createElement("div");
+        row.className = "ask-answer-actions";
+        const copyBtn = document.createElement("button");
+        copyBtn.type = "button";
+        copyBtn.className = "action-btn";
+        copyBtn.textContent = "Copy";
+        copyBtn.addEventListener("click", async () => {
+          await navigator.clipboard?.writeText(ans.textContent);
+          copyBtn.textContent = "Copied ✓";
+        });
+        const backBtn = document.createElement("button");
+        backBtn.type = "button";
+        backBtn.className = "action-btn";
+        backBtn.textContent = "← Back";
+        backBtn.addEventListener("click", () => {
+          openSentenceSuggestionMenu(editor, extraction, anchorPos);
+        });
+        row.appendChild(copyBtn);
+        row.appendChild(backBtn);
+        bodyContainer.appendChild(ans);
+        bodyContainer.appendChild(row);
+      } catch (err) {
+        bodyContainer.innerHTML = `<div class="ask-answer" style="color:#fecaca;">${escapeHtml(err?.message || "Request failed.")}</div>`;
+      }
+    });
+
+    bodyContainer.appendChild(askForm);
   }
 
   function updateFloatingTriggerNow() {
@@ -1900,6 +2010,19 @@
       }
 
       scheduleFloatingTriggerUpdate();
+    },
+    true
+  );
+
+  document.addEventListener(
+    "mousedown",
+    (e) => {
+      if (!activeMenuMode) return;
+      const path = typeof e.composedPath === "function" ? e.composedPath() : [];
+      const insideHost = path.some((node) => node && node.id === HOST_ID);
+      if (!insideHost) {
+        clearActionMenus();
+      }
     },
     true
   );

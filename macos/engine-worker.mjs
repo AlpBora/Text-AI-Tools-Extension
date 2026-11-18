@@ -28,7 +28,7 @@ const PersonalModel = require(path.join(ROOT_DIR, "content", "personal-model.js"
 const SpellcheckEngine = require(path.join(ROOT_DIR, "content", "spellcheck-engine.js"));
 
 const actionsMod = await import(pathToFileURL(path.join(ROOT_DIR, "shared", "actions.js")).href);
-const { ACTIONS, AI_PROVIDERS, callAI, detectProviderFromApiKey, resolveProviderConfig } = actionsMod;
+const { ACTIONS, AI_PROVIDERS, askAIQuestion, callAI, detectProviderFromApiKey, resolveProviderConfig } = actionsMod;
 
 const STATE_DIR = path.join(os.homedir(), ".text-ai-tools");
 const CONFIG_PATH = path.join(STATE_DIR, "config.json");
@@ -334,6 +334,36 @@ export async function handleRequest(req) {
         secondaryLanguage: config.secondaryLanguage,
       });
       return { ok: true, id: req.id, result: output, mode: ACTIONS[actionId].mode };
+    } catch (err) {
+      return { ok: false, id: req.id, error: err?.message || String(err) };
+    }
+  }
+
+  if (req.type === "askAIQuestion") {
+    if (!config.apiKey) {
+      config.apiKey = readApiKeyFromKeychain() || process.env.GEMINI_API_KEY || "";
+    }
+    const providerCfg = resolveProviderConfig(config.provider, config.customBaseUrl);
+    if (providerCfg.requiresKey && !config.apiKey) {
+      return {
+        ok: false,
+        id: req.id,
+        code: "MISSING_API_KEY",
+        error: `${providerCfg.label} API key not found in macOS Keychain.`,
+      };
+    }
+    try {
+      const output = await askAIQuestion({
+        question: String(req.question || ""),
+        text: String(req.text || ""),
+        primaryLanguage: config.primaryLanguage,
+        secondaryLanguage: config.secondaryLanguage,
+        provider: config.provider,
+        customBaseUrl: config.customBaseUrl,
+        apiKey: config.apiKey,
+        model: config.model,
+      });
+      return { ok: true, id: req.id, result: output };
     } catch (err) {
       return { ok: false, id: req.id, error: err?.message || String(err) };
     }
