@@ -1340,6 +1340,19 @@
         napiyon: "ne yapıyorsun",
         napiyosun: "ne yapıyorsun",
         napiyom: "ne yapıyorum",
+        napiyor: "ne yapıyor",
+        napiyoz: "ne yapıyoruz",
+        napalim: "ne yapalım",
+        napim: "ne yapayım",
+        napiyim: "ne yapayım",
+        napcam: "ne yapacağım",
+        napcaz: "ne yapacağız",
+        napcan: "ne yapacaksın",
+        naptin: "ne yaptın",
+        napti: "ne yaptı",
+        naptik: "ne yaptık",
+        napsam: "ne yapsam",
+        napsak: "ne yapsak",
       };
       const exactColloq = COLLOQUIAL_EXACT[folded];
       if (exactColloq && exactColloq !== lower) {
