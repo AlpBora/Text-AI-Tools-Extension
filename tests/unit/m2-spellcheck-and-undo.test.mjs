@@ -276,6 +276,7 @@ describe("M2: Turkish Morphology, Deasciifier, Homographs & Ambiguity Integratio
       { word: "ozetliyorum", expected: "özetliyorum" },
       { word: "gorusecegiz", expected: "görüşeceğiz" },
       { word: "Turkiye'de", expected: "Türkiye'de" },
+      { word: "yonlendirmiyorlardır", expected: "yönlendirmiyorlardır" },
     ];
     for (const { word, expected } of trFixes) {
       const res = SpellcheckEngine.checkWord({

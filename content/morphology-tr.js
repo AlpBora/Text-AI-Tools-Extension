@@ -738,7 +738,7 @@
       }
       add("s" + v4 + "n", "END", v4);
       add("s" + v4 + "n" + v4 + "z", "END", v4);
-      add("l" + v2 + "r", "END", v2);
+      add("l" + v2 + "r", "COP_PL", v2);
       add(dChar + v4 + "r", "COP_DIR", v4);
     }
 
@@ -752,8 +752,12 @@
       }
       add("s" + v4 + "n", "END", v4);
       add("s" + v4 + "n" + v4 + "z", "END", v4);
-      add("l" + v2 + "r", "END", v2);
+      add("l" + v2 + "r", "COP_PL", v2);
       add(dChar + v4 + "r", "COP_DIR", v4);
+    }
+
+    if (s === "COP_PL") {
+      add(dChar + v4 + "r", "END", v4);
     }
 
     if (s === "VERB_TENSE_DI") {
