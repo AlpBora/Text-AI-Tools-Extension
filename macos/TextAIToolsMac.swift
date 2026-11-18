@@ -436,22 +436,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let cfg = (cfgResp?["config"] as? [String: Any]) ?? [:]
         let curProvider = (cfg["provider"] as? String) ?? "gemini"
         let curModel = (cfg["model"] as? String) ?? "gemini-3.5-flash-lite"
+        let curAskModel = (cfg["askModel"] as? String) ?? ""
         let curBaseUrl = (cfg["customBaseUrl"] as? String) ?? ""
         let curPrimary = (cfg["primaryLanguage"] as? String) ?? "Turkish"
         let curSecondary = (cfg["secondaryLanguage"] as? String) ?? "English"
         let hasKey = (cfg["hasApiKey"] as? Bool) ?? false
 
         let providers: [(id: String, label: String, models: [String])] = [
-            ("gemini", "Google Gemini", ["gemini-3.5-flash-lite", "gemini-3.8-flash", "gemini-flash-lite-latest"]),
-            ("openai", "OpenAI", ["gpt-4.1-mini", "gpt-4.1-nano", "gpt-4o-mini", "o4-mini"]),
+            ("gemini", "Google Gemini", [
+                "gemini-3.5-flash-lite",
+                "gemini-3.1-flash-lite",
+                "gemini-3.8-flash",
+                "gemini-3.6-flash",
+                "gemini-3-flash",
+                "gemini-2.5-flash-lite",
+                "gemini-2.5-flash",
+                "gemini-flash-lite-latest"
+            ]),
+            ("openai", "OpenAI", ["gpt-4.1-mini", "gpt-4.1-nano", "gpt-4.1", "gpt-4o-mini", "o4-mini"]),
             ("anthropic", "Anthropic (Claude)", ["claude-3-5-haiku-latest", "claude-sonnet-4-0", "claude-3-7-sonnet-latest"]),
             ("openrouter", "OpenRouter", ["openrouter/free", "meta-llama/llama-3.3-70b-instruct:free", "google/gemma-3-27b-it:free", "qwen/qwen3-32b:free"]),
-            ("groq", "Groq", ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]),
+            ("groq", "Groq", ["llama-3.1-8b-instant", "llama-3.3-70b-versatile"]),
             ("custom", "Custom / Local (OpenAI-Compatible)", ["llama3.2", "qwen2.5:7b", "gemma3"])
         ]
 
         let width: CGFloat = 410
-        let height: CGFloat = 468
+        let height: CGFloat = 520
         let win = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: width, height: height),
             styleMask: [.titled, .closable, .fullSizeContentView],
@@ -503,26 +513,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         glass.addSubview(apiKeyField)
 
         y -= 28
-        _ = makeLabel("AI Model", x: 20, y: y, w: 370)
+        _ = makeLabel("AI Model (Proofread, Translate, Summarize…)", x: 20, y: y, w: 370)
         y -= 26
         let modelBox = NSComboBox(frame: NSRect(x: 20, y: y, width: 370, height: 24))
         modelBox.isEditable = true
         modelBox.completes = true
         glass.addSubview(modelBox)
 
+        y -= 28
+        _ = makeLabel("Ask AI Model (Q&A / Follow-up — optional)", x: 20, y: y, w: 370)
+        y -= 26
+        let askModelBox = NSComboBox(frame: NSRect(x: 20, y: y, width: 370, height: 24))
+        askModelBox.isEditable = true
+        askModelBox.completes = true
+        askModelBox.placeholderString = "Same as above (e.g. gemini-3.8-flash)"
+        glass.addSubview(askModelBox)
+
         func syncProviderModels(resetModel: Bool) {
             let idx = max(0, min(providers.count - 1, providerPopup.indexOfSelectedItem))
             let p = providers[idx]
             modelBox.removeAllItems()
             modelBox.addItems(withObjectValues: p.models)
+            askModelBox.removeAllItems()
+            askModelBox.addItems(withObjectValues: p.models)
             if resetModel || modelBox.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 modelBox.stringValue = p.models.first ?? ""
+            }
+            if resetModel {
+                askModelBox.stringValue = ""
             }
             let isCustom = (p.id == "custom")
             baseUrlLabel.alphaValue = isCustom ? 1.0 : 0.45
             baseUrlField.isEnabled = isCustom
         }
         modelBox.stringValue = curModel
+        askModelBox.stringValue = curAskModel
         syncProviderModels(resetModel: false)
 
         providerPopup.target = ActionTarget.shared
@@ -600,6 +625,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let idx = max(0, min(providers.count - 1, providerPopup.indexOfSelectedItem))
             let chosenProvider = providers[idx].id
             let chosenModel = modelBox.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            let chosenAskModel = askModelBox.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
             let chosenBase = baseUrlField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
             let newKey = apiKeyField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
             let pLang = primaryField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -615,6 +641,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 "provider": chosenProvider,
                 "customBaseUrl": chosenBase,
                 "model": chosenModel.isEmpty ? (providers[idx].models.first ?? "gemini-3.5-flash-lite") : chosenModel,
+                "askModel": chosenAskModel,
                 "primaryLanguage": pLang.isEmpty ? "Turkish" : pLang,
                 "secondaryLanguage": sLang.isEmpty ? "English" : sLang
             ]

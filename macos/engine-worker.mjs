@@ -92,6 +92,7 @@ function loadConfig() {
     provider: "gemini",
     customBaseUrl: "",
     model: "gemini-3.5-flash-lite",
+    askModel: "",
     hotkey: {
       keyCode: 47,
       cmd: true,
@@ -224,6 +225,7 @@ export async function handleRequest(req) {
         provider: config.provider || "gemini",
         customBaseUrl: config.customBaseUrl || "",
         model: config.model,
+        askModel: config.askModel || "",
         hotkey: config.hotkey,
       },
     };
@@ -253,6 +255,7 @@ export async function handleRequest(req) {
       provider: nextProvider,
       customBaseUrl: typeof req.customBaseUrl === "string" ? req.customBaseUrl.trim() : config.customBaseUrl || "",
       model: nextModel,
+      ...(typeof req.askModel === "string" ? { askModel: req.askModel.trim() } : {}),
       ...(req.primaryLanguage ? { primaryLanguage: String(req.primaryLanguage) } : {}),
       ...(req.secondaryLanguage ? { secondaryLanguage: String(req.secondaryLanguage) } : {}),
       ...(typeof req.autoCorrectEnabled === "boolean" ? { autoCorrectEnabled: req.autoCorrectEnabled } : {}),
@@ -362,7 +365,7 @@ export async function handleRequest(req) {
         provider: config.provider,
         customBaseUrl: config.customBaseUrl,
         apiKey: config.apiKey,
-        model: config.model,
+        model: config.askModel || config.model,
       });
       return { ok: true, id: req.id, result: output };
     } catch (err) {

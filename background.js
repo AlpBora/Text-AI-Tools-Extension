@@ -349,7 +349,7 @@ export async function handleRuntimeMessage(msg, sender) {
         provider: settings.provider,
         customBaseUrl: settings.customBaseUrl,
         apiKey: settings.apiKey,
-        model: settings.model
+        model: settings.askModel || settings.model
       });
       return { ok: true, result };
     } catch (err) {

@@ -47,15 +47,22 @@
     </div>
 
     <div class="card">
-      <label for="model">AI Model</label>
+      <label for="model">AI Model (Proofread, Translate, Summarize…)</label>
       <input id="model" type="text" list="model-list" placeholder="gemini-3.5-flash-lite" />
+      <label for="ask-model" style="margin-top: 10px;">Ask AI Model (Q&amp;A / Follow-up — optional)</label>
+      <input id="ask-model" type="text" list="model-list" placeholder="Same as above (e.g. gemini-3.8-flash)" />
       <datalist id="model-list">
         <option value="gemini-3.5-flash-lite"></option>
+        <option value="gemini-3.1-flash-lite"></option>
         <option value="gemini-3.8-flash"></option>
+        <option value="gemini-3.6-flash"></option>
+        <option value="gemini-3-flash"></option>
+        <option value="gemini-2.5-flash-lite"></option>
+        <option value="gemini-2.5-flash"></option>
         <option value="gemini-flash-lite-latest"></option>
       </datalist>
       <div id="model-hint" class="hint">
-        Default: <code>gemini-3.5-flash-lite</code> (suggestions: <code>gemini-3.5-flash-lite</code>, <code>gemini-3.8-flash</code>, <code>gemini-flash-lite-latest</code>).
+        Default: <code>gemini-3.5-flash-lite</code> (Ask AI suggestion: <code>gemini-3.8-flash</code>).
       </div>
     </div>
 

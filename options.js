@@ -15,6 +15,7 @@ const customBaseUrlInput = document.getElementById("custom-base-url");
 const apiKeyInput = document.getElementById("api-key");
 const toggleKeyBtn = document.getElementById("toggle-key");
 const modelInput = document.getElementById("model");
+const askModelInput = document.getElementById("ask-model");
 const modelList = document.getElementById("model-list");
 const modelHint = document.getElementById("model-hint");
 const primaryLanguageInput = document.getElementById("primary-language");
@@ -47,6 +48,9 @@ function syncProviderUI(providerId, { updateModel = false } = {}) {
   customBaseUrlWrap.style.display = profile.id === "custom" ? "block" : "none";
   apiKeyInput.placeholder = profile.apiKeyPlaceholder;
   modelInput.placeholder = profile.defaultModel;
+  if (askModelInput) {
+    askModelInput.placeholder = `Same as above (e.g. ${profile.defaultAskModel || profile.defaultModel})`;
+  }
 
   modelList.replaceChildren(
     ...profile.models.map((m) => {
@@ -72,6 +76,9 @@ function syncProviderUI(providerId, { updateModel = false } = {}) {
   if (updateModel && isKnownModelForAnotherProvider(modelInput.value, profile.id)) {
     modelInput.value = profile.defaultModel;
   }
+  if (updateModel && askModelInput && askModelInput.value.trim() && isKnownModelForAnotherProvider(askModelInput.value, profile.id)) {
+    askModelInput.value = profile.defaultAskModel || "";
+  }
 }
 
 async function ensureHostPermission(providerId, customBaseUrl) {
@@ -91,6 +98,9 @@ async function load() {
   customBaseUrlInput.value = settings.customBaseUrl || "";
   apiKeyInput.value = settings.apiKey;
   modelInput.value = settings.model || AI_PROVIDERS[providerSelect.value].defaultModel;
+  if (askModelInput) {
+    askModelInput.value = settings.askModel || "";
+  }
   syncProviderUI(providerSelect.value, { updateModel: false });
   primaryLanguageInput.value = settings.primaryLanguage || DEFAULT_PRIMARY_LANGUAGE;
   secondaryLanguageInput.value = settings.secondaryLanguage || DEFAULT_SECONDARY_LANGUAGE;
@@ -123,6 +133,7 @@ saveBtn.addEventListener("click", async () => {
   const profile = AI_PROVIDERS[provider];
   const apiKey = apiKeyInput.value.trim();
   const model = modelInput.value.trim() || profile.defaultModel;
+  const askModel = askModelInput ? askModelInput.value.trim() : "";
   const primaryLanguage = primaryLanguageInput.value.trim() || DEFAULT_PRIMARY_LANGUAGE;
   const secondaryLanguage = secondaryLanguageInput.value.trim() || DEFAULT_SECONDARY_LANGUAGE;
   const spellcheckEnabled = spellcheckEnabledCheckbox.checked;
@@ -135,6 +146,7 @@ saveBtn.addEventListener("click", async () => {
     customBaseUrl,
     apiKey,
     model,
+    askModel,
     primaryLanguage,
     secondaryLanguage,
     spellcheckEnabled,

@@ -7,7 +7,17 @@ export const AI_PROVIDERS = {
     id: "gemini",
     label: "Google Gemini",
     defaultModel: "gemini-3.5-flash-lite",
-    models: ["gemini-3.5-flash-lite", "gemini-3.8-flash", "gemini-flash-lite-latest"],
+    defaultAskModel: "gemini-3.8-flash",
+    models: [
+      "gemini-3.5-flash-lite",
+      "gemini-3.1-flash-lite",
+      "gemini-3.8-flash",
+      "gemini-3.6-flash",
+      "gemini-3-flash",
+      "gemini-2.5-flash-lite",
+      "gemini-2.5-flash",
+      "gemini-flash-lite-latest"
+    ],
     baseUrl: "https://generativelanguage.googleapis.com/v1beta",
     requiresKey: true,
     apiKeyPlaceholder: "AIza..."
@@ -16,7 +26,8 @@ export const AI_PROVIDERS = {
     id: "openai",
     label: "OpenAI",
     defaultModel: "gpt-4.1-mini",
-    models: ["gpt-4.1-mini", "gpt-4.1-nano", "gpt-4o-mini", "o4-mini"],
+    defaultAskModel: "gpt-4.1",
+    models: ["gpt-4.1-mini", "gpt-4.1-nano", "gpt-4.1", "gpt-4o-mini", "o4-mini"],
     baseUrl: "https://api.openai.com/v1",
     requiresKey: true,
     apiKeyPlaceholder: "sk-..."
@@ -25,6 +36,7 @@ export const AI_PROVIDERS = {
     id: "openrouter",
     label: "OpenRouter",
     defaultModel: "openrouter/free",
+    defaultAskModel: "openrouter/free",
     models: [
       "openrouter/free",
       "meta-llama/llama-3.3-70b-instruct:free",
@@ -39,6 +51,7 @@ export const AI_PROVIDERS = {
     id: "anthropic",
     label: "Anthropic (Claude)",
     defaultModel: "claude-3-5-haiku-latest",
+    defaultAskModel: "claude-sonnet-4-0",
     models: [
       "claude-3-5-haiku-latest",
       "claude-sonnet-4-0",
@@ -51,8 +64,9 @@ export const AI_PROVIDERS = {
   groq: {
     id: "groq",
     label: "Groq",
-    defaultModel: "llama-3.3-70b-versatile",
-    models: ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"],
+    defaultModel: "llama-3.1-8b-instant",
+    defaultAskModel: "llama-3.3-70b-versatile",
+    models: ["llama-3.1-8b-instant", "llama-3.3-70b-versatile"],
     baseUrl: "https://api.groq.com/openai/v1",
     requiresKey: true,
     apiKeyPlaceholder: "gsk_..."
@@ -61,6 +75,7 @@ export const AI_PROVIDERS = {
     id: "custom",
     label: "Custom / Local (OpenAI-Compatible)",
     defaultModel: "llama3.2",
+    defaultAskModel: "llama3.2",
     models: ["llama3.2", "qwen2.5:7b", "gemma3"],
     baseUrl: "http://localhost:11434/v1",
     requiresKey: false,
@@ -94,6 +109,7 @@ export const DEFAULT_SETTINGS = {
   customBaseUrl: "",
   apiKey: "",
   model: DEFAULT_MODEL,
+  askModel: "",
   primaryLanguage: DEFAULT_PRIMARY_LANGUAGE,
   secondaryLanguage: DEFAULT_SECONDARY_LANGUAGE,
   copyOnReplace: true,
@@ -243,6 +259,7 @@ export async function getSettings() {
     customBaseUrl: (data.customBaseUrl || "").trim(),
     apiKey: (data.apiKey || "").trim(),
     model: (data.model || profile.defaultModel).trim() || profile.defaultModel,
+    askModel: (data.askModel || "").trim(),
     primaryLanguage: (data.primaryLanguage || DEFAULT_PRIMARY_LANGUAGE).trim() || DEFAULT_PRIMARY_LANGUAGE,
     secondaryLanguage: (data.secondaryLanguage || DEFAULT_SECONDARY_LANGUAGE).trim() || DEFAULT_SECONDARY_LANGUAGE,
     copyOnReplace: Boolean(data.copyOnReplace),
