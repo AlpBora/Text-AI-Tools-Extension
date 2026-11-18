@@ -413,19 +413,10 @@ export function registerListeners() {
 
   chrome.runtime.onInstalled?.addListener(() => {
     setupContextMenus();
-    chrome.alarms?.create?.(UPDATE_ALARM_NAME, { periodInMinutes: 30 });
-    runPeriodicUpdateCheck();
   });
   chrome.runtime.onStartup?.addListener(() => {
     setupContextMenus();
-    chrome.alarms?.create?.(UPDATE_ALARM_NAME, { periodInMinutes: 30 });
     runPeriodicUpdateCheck();
-  });
-
-  chrome.alarms?.onAlarm?.addListener((alarm) => {
-    if (alarm?.name === UPDATE_ALARM_NAME) {
-      runPeriodicUpdateCheck();
-    }
   });
 
   chrome.storage?.onChanged?.addListener((changes, area) => {
