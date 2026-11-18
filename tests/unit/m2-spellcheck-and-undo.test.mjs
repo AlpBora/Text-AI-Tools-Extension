@@ -366,6 +366,10 @@ describe("M2: Turkish Morphology, Deasciifier, Homographs & Ambiguity Integratio
   it("normalizes colloquial Turkish shorthands (bikac, uyuyom, yatiyom, bekliyo, bisi) and adapts to userHabits", () => {
     const colloquialCases = [
       ["bikac", "birkaç"],
+      ["napalim", "ne yapalım"],
+      ["napalım", "ne yapalım"],
+      ["napcam", "ne yapacağım"],
+      ["naptın", "ne yaptın"],
       ["uyuyom", "uyuyorum"],
       ["yatiyom", "yatıyorum"],
       ["geliyom", "geliyorum"],
