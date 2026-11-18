@@ -600,6 +600,7 @@ export async function fetchContextualWordSuggestions({
 export async function askAIQuestion({
   question,
   text,
+  history = [],
   primaryLanguage = DEFAULT_PRIMARY_LANGUAGE,
   secondaryLanguage = DEFAULT_SECONDARY_LANGUAGE,
   provider = DEFAULT_PROVIDER,
@@ -618,7 +619,14 @@ export async function askAIQuestion({
   }
   const primary = (primaryLanguage || DEFAULT_PRIMARY_LANGUAGE).trim() || DEFAULT_PRIMARY_LANGUAGE;
   const systemPrompt = `You are a concise, helpful assistant. Answer the user's question about the provided text clearly and briefly (in ${primary} if the question is in ${primary}, otherwise match the question's language).`;
-  const userText = `Text:\n${cleanText}\n\nQuestion:\n${cleanQ}`;
+  const historyBlock = Array.isArray(history) && history.length > 0
+    ? "\n\nPrevious conversation:\n" +
+      history
+        .slice(-6)
+        .map((m) => `${m.role === "assistant" ? "Assistant" : "User"}: ${String(m.text || "").trim()}`)
+        .join("\n")
+    : "";
+  const userText = `Text:\n${cleanText}${historyBlock}\n\nQuestion:\n${cleanQ}`;
   return requestAI({
     provider,
     customBaseUrl,

@@ -1646,6 +1646,66 @@
 
     bodyContainer.appendChild(grid);
 
+    const qaHistory = [];
+    const renderQAView = (errorMsg = "") => {
+      bodyContainer.innerHTML = "";
+      const thread = document.createElement("div");
+      thread.className = "ask-answer";
+      if (errorMsg) {
+        thread.style.color = "#fecaca";
+        thread.textContent = errorMsg;
+      } else {
+        thread.textContent = qaHistory
+          .map((item) => (item.role === "user" ? `› ${item.text}` : item.text))
+          .join("\n\n");
+      }
+      bodyContainer.appendChild(thread);
+      thread.scrollTop = thread.scrollHeight;
+
+      const followForm = document.createElement("form");
+      followForm.className = "ask-form";
+      const followInput = document.createElement("input");
+      followInput.type = "text";
+      followInput.className = "ask-input";
+      followInput.placeholder = "Ask follow-up…";
+      const followSend = document.createElement("button");
+      followSend.type = "submit";
+      followSend.className = "ask-send";
+      followSend.textContent = "→";
+      followForm.appendChild(followInput);
+      followForm.appendChild(followSend);
+      followForm.addEventListener("submit", (ev) => {
+        ev.preventDefault();
+        submitQuestion(followInput.value.trim());
+      });
+      bodyContainer.appendChild(followForm);
+      followInput.focus();
+    };
+
+    const submitQuestion = async (q) => {
+      if (!q) return;
+      bodyContainer.innerHTML = `<div class="loading-row"><div class="spinner"></div><span>Thinking…</span></div>`;
+      try {
+        const res = await chrome.runtime.sendMessage({
+          type: "askAIQuestion",
+          question: q,
+          text: extraction.text,
+          history: qaHistory,
+          primaryLang: settings.primaryLanguage,
+          secondaryLang: settings.secondaryLanguage
+        });
+        if (!res?.ok) {
+          renderQAView(res?.error || "Request failed.");
+          return;
+        }
+        qaHistory.push({ role: "user", text: q });
+        qaHistory.push({ role: "assistant", text: (res.result || "").trim() });
+        renderQAView();
+      } catch (err) {
+        renderQAView(err?.message || "Request failed.");
+      }
+    };
+
     const askForm = document.createElement("form");
     askForm.className = "ask-form";
     const askInput = document.createElement("input");
@@ -1659,51 +1719,9 @@
     askForm.appendChild(askInput);
     askForm.appendChild(askSend);
 
-    askForm.addEventListener("submit", async (e) => {
+    askForm.addEventListener("submit", (e) => {
       e.preventDefault();
-      const q = askInput.value.trim();
-      if (!q) return;
-      bodyContainer.innerHTML = `<div class="loading-row"><div class="spinner"></div><span>Thinking…</span></div>`;
-      try {
-        const res = await chrome.runtime.sendMessage({
-          type: "askAIQuestion",
-          question: q,
-          text: extraction.text,
-          primaryLang: settings.primaryLanguage,
-          secondaryLang: settings.secondaryLanguage
-        });
-        if (!res?.ok) {
-          bodyContainer.innerHTML = `<div class="ask-answer" style="color:#fecaca;">${escapeHtml(res?.error || "Request failed.")}</div>`;
-          return;
-        }
-        bodyContainer.innerHTML = "";
-        const ans = document.createElement("div");
-        ans.className = "ask-answer";
-        ans.textContent = (res.result || "").trim();
-        const row = document.createElement("div");
-        row.className = "ask-answer-actions";
-        const copyBtn = document.createElement("button");
-        copyBtn.type = "button";
-        copyBtn.className = "action-btn";
-        copyBtn.textContent = "Copy";
-        copyBtn.addEventListener("click", async () => {
-          await navigator.clipboard?.writeText(ans.textContent);
-          copyBtn.textContent = "Copied ✓";
-        });
-        const backBtn = document.createElement("button");
-        backBtn.type = "button";
-        backBtn.className = "action-btn";
-        backBtn.textContent = "← Back";
-        backBtn.addEventListener("click", () => {
-          openSentenceSuggestionMenu(editor, extraction, anchorPos);
-        });
-        row.appendChild(copyBtn);
-        row.appendChild(backBtn);
-        bodyContainer.appendChild(ans);
-        bodyContainer.appendChild(row);
-      } catch (err) {
-        bodyContainer.innerHTML = `<div class="ask-answer" style="color:#fecaca;">${escapeHtml(err?.message || "Request failed.")}</div>`;
-      }
+      submitQuestion(askInput.value.trim());
     });
 
     bodyContainer.appendChild(askForm);

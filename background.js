@@ -343,6 +343,7 @@ export async function handleRuntimeMessage(msg, sender) {
       const result = await askAIQuestion({
         question: msg.question,
         text: msg.text,
+        history: Array.isArray(msg.history) ? msg.history : [],
         primaryLanguage: msg.primaryLang || settings.primaryLanguage,
         secondaryLanguage: msg.secondaryLang || settings.secondaryLanguage,
         provider: settings.provider,

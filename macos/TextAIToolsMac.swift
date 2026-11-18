@@ -1142,7 +1142,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.executePanelQuestion(
                 question: q,
                 selectedText: selectedText,
-                previousClipboard: previousClipboard,
                 panel: panel
             )
         }
@@ -1156,7 +1155,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func executePanelQuestion(
         question: String,
         selectedText: String,
-        previousClipboard: String?,
+        history: [[String: String]] = [],
         panel: InlineActionPanel
     ) {
         panel.contentView?.subviews.forEach { $0.removeFromSuperview() }
@@ -1170,19 +1169,81 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             cv.addSubview(statusLbl)
         }
 
-        worker.sendAsync(["type": "askAIQuestion", "question": question, "text": selectedText]) { [weak self] resp in
+        worker.sendAsync([
+            "type": "askAIQuestion",
+            "question": question,
+            "text": selectedText,
+            "history": history
+        ]) { [weak self] resp in
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 let ok = (resp["ok"] as? Bool) ?? false
                 if !ok {
                     let err = (resp["error"] as? String) ?? "Request failed."
-                    self.showPanelResult(text: err, isError: true, previousClipboard: previousClipboard, panel: panel, keepSize: true)
+                    self.showPanelQAResult(history: history, errorText: err, selectedText: selectedText, panel: panel)
                     return
                 }
                 let resultText = ((resp["result"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-                self.showPanelResult(text: resultText, isError: false, previousClipboard: previousClipboard, panel: panel, keepSize: true)
+                var nextHistory = history
+                nextHistory.append(["role": "user", "text": question])
+                nextHistory.append(["role": "assistant", "text": resultText])
+                self.showPanelQAResult(history: nextHistory, errorText: nil, selectedText: selectedText, panel: panel)
             }
         }
+    }
+
+    private func showPanelQAResult(
+        history: [[String: String]],
+        errorText: String?,
+        selectedText: String,
+        panel: InlineActionPanel
+    ) {
+        let w = panel.frame.width
+        let h = panel.frame.height
+        guard let contentView = panel.contentView else { return }
+        contentView.subviews.forEach { $0.removeFromSuperview() }
+        addGlassHeader(to: contentView, width: w, height: h, panel: panel)
+
+        let scroll = NSScrollView(frame: NSRect(x: 10, y: 42, width: w - 20, height: h - 76))
+        scroll.hasVerticalScroller = true
+        scroll.drawsBackground = false
+        let tv = NSTextView(frame: scroll.bounds)
+        tv.isEditable = false
+        tv.drawsBackground = false
+        tv.font = NSFont.systemFont(ofSize: 11.5)
+        if let err = errorText {
+            tv.textColor = NSColor(calibratedRed: 1.0, green: 0.65, blue: 0.65, alpha: 1.0)
+            tv.string = err
+        } else {
+            tv.textColor = .white
+            tv.string = history.map { item in
+                let txt = item["text"] ?? ""
+                return (item["role"] == "user") ? "› \(txt)" : txt
+            }.joined(separator: "\n\n")
+        }
+        scroll.documentView = tv
+        contentView.addSubview(scroll)
+        tv.scrollToEndOfDocument(nil)
+
+        let followField = NSTextField(frame: NSRect(x: 10, y: 10, width: w - 20, height: 24))
+        followField.placeholderString = "Ask follow-up… (↵)"
+        followField.font = NSFont.systemFont(ofSize: 11.5)
+        followField.textColor = .white
+        followField.drawsBackground = true
+        followField.backgroundColor = NSColor(calibratedRed: 0.02, green: 0.07, blue: 0.16, alpha: 0.55)
+        followField.isBezeled = true
+        followField.bezelStyle = .roundedBezel
+        followField.focusRingType = .none
+        followField.target = ActionTarget.shared
+        followField.action = #selector(ActionTarget.handleClick(_:))
+        ActionTarget.shared.register(button: followField) { [weak self, weak panel, weak followField] in
+            guard let self = self, let panel = panel, let followField = followField else { return }
+            let q = followField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !q.isEmpty else { return }
+            self.executePanelQuestion(question: q, selectedText: selectedText, history: history, panel: panel)
+        }
+        contentView.addSubview(followField)
+        panel.makeFirstResponder(followField)
     }
 
     private func executePanelAction(
@@ -1287,8 +1348,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         scroll.documentView = tv
         contentView.addSubview(scroll)
 
-        let copyBtn = GlassActionButton(frame: NSRect(x: newWidth - 112, y: 10, width: 100, height: 26))
-        copyBtn.title = "Copy"
+        let btnW = floor((newWidth - 32) / 2)
+        let copyBtn = GlassActionButton(frame: NSRect(x: newWidth - 12 - btnW, y: 10, width: btnW, height: 26))
+        copyBtn.title = "  Copy"
         copyBtn.isPrimaryGlass = true
         copyBtn.keyEquivalent = "\r"
         copyBtn.target = ActionTarget.shared
@@ -1302,8 +1364,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         contentView.addSubview(copyBtn)
 
         if !isError {
-            let replaceBtn = GlassActionButton(frame: NSRect(x: 12, y: 10, width: 124, height: 26))
-            replaceBtn.title = "Replace"
+            let replaceBtn = GlassActionButton(frame: NSRect(x: 12, y: 10, width: btnW, height: 26))
+            replaceBtn.title = "  Replace"
             replaceBtn.target = ActionTarget.shared
             replaceBtn.action = #selector(ActionTarget.handleClick(_:))
             ActionTarget.shared.register(button: replaceBtn) { [weak self, weak panel] in

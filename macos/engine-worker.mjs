@@ -356,6 +356,7 @@ export async function handleRequest(req) {
       const output = await askAIQuestion({
         question: String(req.question || ""),
         text: String(req.text || ""),
+        history: Array.isArray(req.history) ? req.history : [],
         primaryLanguage: config.primaryLanguage,
         secondaryLanguage: config.secondaryLanguage,
         provider: config.provider,
