@@ -1183,11 +1183,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         pb.clearContents()
         pb.setString(text, forType: .string)
 
-        savedFrontApp?.activate(options: [])
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
+        if let app = savedFrontApp {
+            if #available(macOS 14.0, *) {
+                NSApp.yieldActivation(to: app)
+            }
+            app.activate(options: [.activateIgnoringOtherApps])
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) { [weak self] in
             self?.postCommandKey(virtualKey: 9) // 'v'
             if let prev = restoreClipboard {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) {
                     pb.clearContents()
                     pb.setString(prev, forType: .string)
                 }
