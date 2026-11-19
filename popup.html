@@ -12,8 +12,8 @@
         <h1>Text AI Tools</h1>
       </div>
       <div class="row">
-        <button id="open-shortcuts" class="link-btn" type="button">Shortcuts</button>
-        <button id="open-options" class="link-btn" type="button">Settings</button>
+        <button id="open-shortcuts" class="link-btn" type="button" data-i18n="popupShortcutsBtn">Shortcuts</button>
+        <button id="open-options" class="link-btn" type="button" data-i18n="popupSettingsBtn">Settings</button>
       </div>
     </div>
 
@@ -53,25 +53,25 @@
       <label for="input-text">Text</label>
       <textarea id="input-text" rows="5" placeholder="Type or paste text here..."></textarea>
       <div class="actions-grid">
-        <button class="btn btn-primary action-btn" data-action="fix" type="button">Proofread</button>
-        <button class="btn action-btn" data-action="concise" type="button">Shorten</button>
-        <button class="btn action-btn" data-action="professional" type="button">Professional</button>
+        <button class="btn btn-primary action-btn" data-action="fix" type="button" data-i18n="actionFix">Proofread</button>
+        <button class="btn action-btn" data-action="concise" type="button" data-i18n="actionConcise">Shorten</button>
+        <button class="btn action-btn" data-action="professional" type="button" data-i18n="actionProfessional">Professional</button>
         <button class="btn action-btn" id="translate-btn" data-action="translate" type="button">Translate</button>
-        <button class="btn action-btn" data-action="summarize" type="button">Summarize</button>
-        <button class="btn action-btn" data-action="keypoints" type="button">Key Points</button>
+        <button class="btn action-btn" data-action="summarize" type="button" data-i18n="actionSummarize">Summarize</button>
+        <button class="btn action-btn" data-action="keypoints" type="button" data-i18n="actionKeypoints">Key Points</button>
       </div>
       <div id="status" class="status"></div>
     </div>
 
     <div id="result-card" class="card hidden">
       <div class="row-between" style="margin-bottom: 6px;">
-        <label for="output-text" style="margin-bottom: 0;">Result</label>
-        <button id="copy-output" class="link-btn" type="button">Copy</button>
+        <label for="output-text" style="margin-bottom: 0;" data-i18n="popupResultLabel">Result</label>
+        <button id="copy-output" class="link-btn" type="button" data-i18n="popupCopyBtn">Copy</button>
       </div>
       <textarea id="output-text" rows="5" readonly></textarea>
     </div>
 
-    <div class="hint">
+    <div class="hint" data-i18n="popupTip">
       Tip: Local spellcheck runs automatically at word boundaries. Click the sentence button or right-click selected text → <b>Text AI Tools</b> for AI actions.
     </div>
 

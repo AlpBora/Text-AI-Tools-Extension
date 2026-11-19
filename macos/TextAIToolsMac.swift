@@ -107,6 +107,16 @@ enum GlassTheme {
     }
 }
 
+enum AppL10n {
+    static var lang: String {
+        get { UserDefaults.standard.string(forKey: "uiLanguage") == "tr" ? "tr" : "en" }
+        set { UserDefaults.standard.set(newValue == "tr" ? "tr" : "en", forKey: "uiLanguage") }
+    }
+    static func s(_ en: String, _ tr: String) -> String {
+        lang == "tr" ? tr : en
+    }
+}
+
 final class GlassGradientBackdropView: NSView {
     let gradientLayer = CAGradientLayer()
 
@@ -541,14 +551,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(statusMenuItem)
         menu.addItem(NSMenuItem.separator())
 
-        toggleItem = NSMenuItem(title: "Auto-Correct Enabled", action: #selector(toggleAutoCorrect), keyEquivalent: "")
+        toggleItem = NSMenuItem(title: AppL10n.s("Auto-Correct Enabled", "Otomatik Düzeltme Aktif"), action: #selector(toggleAutoCorrect), keyEquivalent: "")
         toggleItem.state = .on
         menu.addItem(toggleItem)
 
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "Settings…", action: #selector(openSettingsWindow), keyEquivalent: ","))
+        menu.addItem(NSMenuItem(title: AppL10n.s("Settings…", "Ayarlar…"), action: #selector(openSettingsWindow), keyEquivalent: ","))
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "Quit", action: #selector(quitApp), keyEquivalent: "q"))
+        menu.addItem(NSMenuItem(title: AppL10n.s("Quit", "Çıkış"), action: #selector(quitApp), keyEquivalent: "q"))
 
         statusItem.menu = menu
     }
@@ -588,14 +598,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ]
 
         let width: CGFloat = 410
-        let height: CGFloat = 556
+        let height: CGFloat = 588
         let win = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: width, height: height),
             styleMask: [.titled, .closable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
-        win.title = "Text AI Tools — Settings"
+        win.title = AppL10n.s("Text AI Tools — Settings", "Text AI Tools — Ayarlar")
         win.appearance = NSAppearance(named: .darkAqua)
         win.titlebarAppearsTransparent = true
         win.isOpaque = false
@@ -607,7 +617,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         glass.autoresizingMask = [.width, .height]
         win.contentView = glass
 
-        let tabSeg = NSSegmentedControl(labels: ["General", "Appearance"], trackingMode: .selectOne, target: ActionTarget.shared, action: #selector(ActionTarget.handleClick(_:)))
+        let tabSeg = NSSegmentedControl(labels: [AppL10n.s("General", "Genel"), AppL10n.s("Appearance", "Görünüm")], trackingMode: .selectOne, target: ActionTarget.shared, action: #selector(ActionTarget.handleClick(_:)))
         tabSeg.selectedSegment = 0
         tabSeg.frame = NSRect(x: (width - 210) / 2, y: height - 58, width: 210, height: 26)
         glass.addSubview(tabSeg)
@@ -634,8 +644,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return l
         }
 
-        var y = bodyFrame.height - 24
-        _ = makeLabel("AI Provider", x: 20, y: y, w: 370)
+        var y = bodyFrame.height - 22
+        _ = makeLabel(AppL10n.s("Interface Language", "Arayüz Dili"), x: 20, y: y, w: 170)
+        let uiLangPopup = NSPopUpButton(frame: NSRect(x: 200, y: y - 4, width: 190, height: 24), pullsDown: false)
+        uiLangPopup.addItems(withTitles: ["English", "Türkçe"])
+        uiLangPopup.selectItem(at: AppL10n.lang == "tr" ? 1 : 0)
+        uiLangPopup.target = ActionTarget.shared
+        uiLangPopup.action = #selector(ActionTarget.handleClick(_:))
+        ActionTarget.shared.register(button: uiLangPopup) { [weak self] in
+            AppL10n.lang = (uiLangPopup.indexOfSelectedItem == 1) ? "tr" : "en"
+            self?.setupMenuBar()
+            self?.openSettingsWindow()
+        }
+        generalView.addSubview(uiLangPopup)
+
+        y -= 32
+        _ = makeLabel(AppL10n.s("AI Provider", "Yapay Zeka Sağlayıcısı"), x: 20, y: y, w: 370)
         y -= 28
         let providerPopup = NSPopUpButton(frame: NSRect(x: 20, y: y, width: 370, height: 26), pullsDown: false)
         for p in providers { providerPopup.addItem(withTitle: p.label) }
@@ -727,27 +751,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         generalView.addSubview(changeHkBtn)
 
+        func makeWhiteCheckbox(title: String, checked: Bool, y: CGFloat) -> NSButton {
+            let cb = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+            cb.frame = NSRect(x: 20, y: y, width: 20, height: 20)
+            cb.state = checked ? .on : .off
+            generalView.addSubview(cb)
+
+            let lbl = NSButton(frame: NSRect(x: 42, y: y, width: 350, height: 20))
+            lbl.isBordered = false
+            lbl.setButtonType(.momentaryChange)
+            let para = NSMutableParagraphStyle()
+            para.alignment = .left
+            lbl.attributedTitle = NSAttributedString(
+                string: title,
+                attributes: [
+                    .foregroundColor: NSColor.white,
+                    .font: NSFont.systemFont(ofSize: 12),
+                    .paragraphStyle: para
+                ]
+            )
+            lbl.target = ActionTarget.shared
+            lbl.action = #selector(ActionTarget.handleClick(_:))
+            ActionTarget.shared.register(button: lbl) {
+                cb.state = (cb.state == .on) ? .off : .on
+            }
+            generalView.addSubview(lbl)
+            return cb
+        }
+
         y -= 32
-        let skipCb = NSButton(checkboxWithTitle: "Skip Chromium/Orion Browsers (Use Browser Extension)", target: nil, action: nil)
-        skipCb.frame = NSRect(x: 20, y: y, width: 370, height: 20)
-        skipCb.state = skipBrowsers ? .on : .off
-        skipCb.contentTintColor = .white
-        skipCb.attributedTitle = NSAttributedString(
-            string: "Skip Chromium/Orion Browsers (Use Browser Extension)",
-            attributes: [.foregroundColor: NSColor.white, .font: NSFont.systemFont(ofSize: 12)]
+        let skipCb = makeWhiteCheckbox(
+            title: "Skip Chromium/Orion Browsers (Use Browser Extension)",
+            checked: skipBrowsers,
+            y: y
         )
-        generalView.addSubview(skipCb)
 
         y -= 24
-        let autoUpdCb = NSButton(checkboxWithTitle: "Auto-Update in Background (5m local / 1h GitHub)", target: nil, action: nil)
-        autoUpdCb.frame = NSRect(x: 20, y: y, width: 370, height: 20)
-        autoUpdCb.state = autoUpdateEnabled ? .on : .off
-        autoUpdCb.contentTintColor = .white
-        autoUpdCb.attributedTitle = NSAttributedString(
-            string: "Auto-Update in Background (5m local / 1h GitHub)",
-            attributes: [.foregroundColor: NSColor.white, .font: NSFont.systemFont(ofSize: 12)]
+        let autoUpdCb = makeWhiteCheckbox(
+            title: "Auto-Update in Background (5m local / 1h GitHub)",
+            checked: autoUpdateEnabled,
+            y: y
         )
-        generalView.addSubview(autoUpdCb)
 
         y -= 30
         let statusLbl = makeLabel("", x: 20, y: y, w: 370, bold: false, size: 11.5)
@@ -1570,12 +1614,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         addGlassHeader(to: contentView, width: width, height: height, panel: panel)
 
         let actions: [(id: String, title: String, key: String, primary: Bool)] = [
-            ("fix", "1. Proofread", "1", true),
-            ("concise", "2. Shorten", "2", false),
-            ("professional", "3. Professional", "3", false),
-            ("translate", "4. Translate (TR↔EN)", "4", false),
-            ("summarize", "5. Summarize", "5", false),
-            ("keypoints", "6. Key Points", "6", false)
+            ("fix", AppL10n.s("1. Proofread", "1. Redaksiyon"), "1", true),
+            ("concise", AppL10n.s("2. Shorten", "2. Kısalt"), "2", false),
+            ("professional", AppL10n.s("3. Professional", "3. Profesyonel"), "3", false),
+            ("translate", AppL10n.s("4. Translate (TR↔EN)", "4. Çevir (TR↔EN)"), "4", false),
+            ("summarize", AppL10n.s("5. Summarize", "5. Özetle"), "5", false),
+            ("keypoints", AppL10n.s("6. Key Points", "6. Ana Noktalar"), "6", false)
         ]
 
         var curY = height - 60
@@ -1601,7 +1645,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let askField = NSTextField(frame: NSRect(x: 10, y: 10, width: width - 20, height: 24))
-        askField.placeholderString = "Ask AI about this… (↵)"
+        askField.placeholderString = AppL10n.s("Ask AI about this… (↵)", "Metin hakkında sor… (↵)")
         askField.font = NSFont.systemFont(ofSize: 11.5)
         askField.textColor = .white
         askField.drawsBackground = true
@@ -1702,7 +1746,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         tv.scrollToEndOfDocument(nil)
 
         let followField = NSTextField(frame: NSRect(x: 10, y: 10, width: w - 20, height: 24))
-        followField.placeholderString = "Ask follow-up… (↵)"
+        followField.placeholderString = AppL10n.s("Ask follow-up… (↵)", "Devam sorusu sor… (↵)")
         followField.font = NSFont.systemFont(ofSize: 11.5)
         followField.textColor = .white
         followField.drawsBackground = true
@@ -1826,7 +1870,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let btnW = floor((newWidth - 32) / 2)
         let copyBtn = GlassActionButton(frame: NSRect(x: newWidth - 12 - btnW, y: 10, width: btnW, height: 26))
-        copyBtn.title = "  Copy"
+        copyBtn.title = "  " + AppL10n.s("Copy", "Kopyala")
         copyBtn.isPrimaryGlass = true
         copyBtn.keyEquivalent = "\r"
         copyBtn.target = ActionTarget.shared
@@ -1841,7 +1885,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         if !isError {
             let replaceBtn = GlassActionButton(frame: NSRect(x: 12, y: 10, width: btnW, height: 26))
-            replaceBtn.title = "  Replace"
+            replaceBtn.title = "  " + AppL10n.s("Replace", "Değiştir")
             replaceBtn.target = ActionTarget.shared
             replaceBtn.action = #selector(ActionTarget.handleClick(_:))
             ActionTarget.shared.register(button: replaceBtn) { [weak self, weak panel] in

@@ -8,6 +8,7 @@ import {
   getSettings,
   resolveProviderConfig
 } from "./shared/actions.js";
+import { t } from "./shared/i18n.js";
 
 const STATIC_HOST_PROVIDERS = new Set(["gemini", "openai", "anthropic", "openrouter", "groq"]);
 
@@ -36,6 +37,7 @@ export async function ensureHostPermission(providerId, customBaseUrl) {
 function initOptions() {
   if (typeof document === "undefined") return;
 
+  const uiLanguageSelect = document.getElementById("ui-language");
   const providerSelect = document.getElementById("provider");
   const customBaseUrlWrap = document.getElementById("custom-base-url-wrap");
   const customBaseUrlInput = document.getElementById("custom-base-url");
@@ -59,6 +61,20 @@ function initOptions() {
   function setStatus(message, type = "") {
     statusEl.textContent = message;
     statusEl.className = `status ${type}`.trim();
+  }
+
+  function applyUiLanguage(lang) {
+    const cleanLang = lang === "tr" ? "tr" : "en";
+    document.documentElement.lang = cleanLang;
+    document.querySelectorAll("[data-i18n]").forEach((el) => {
+      const key = el.getAttribute("data-i18n");
+      if (key) {
+        el.textContent = t(cleanLang, key);
+      }
+    });
+    if (toggleKeyBtn && apiKeyInput) {
+      toggleKeyBtn.textContent = apiKeyInput.type === "password" ? t(cleanLang, "showBtn") : t(cleanLang, "hideBtn");
+    }
   }
 
   function isKnownModelForAnotherProvider(modelVal, targetProviderId) {
@@ -117,6 +133,10 @@ function initOptions() {
 
   async function load() {
     const settings = await getSettings();
+    if (uiLanguageSelect) {
+      uiLanguageSelect.value = settings.uiLanguage || "en";
+      applyUiLanguage(uiLanguageSelect.value);
+    }
     providerSelect.value = settings.provider || DEFAULT_PROVIDER;
     customBaseUrlInput.value = settings.customBaseUrl || "";
     apiKeyInput.value = settings.apiKey;
@@ -132,7 +152,11 @@ function initOptions() {
     copyOnReplaceCheckbox.checked = settings.copyOnReplace;
   }
 
-  providerSelect.addEventListener("change", () => {
+  uiLanguageSelect?.addEventListener("change", () => {
+  applyUiLanguage(uiLanguageSelect.value);
+});
+
+providerSelect.addEventListener("change", () => {
     syncProviderUI(providerSelect.value, { updateModel: true });
   });
 
@@ -151,6 +175,7 @@ function initOptions() {
   });
 
   saveBtn.addEventListener("click", async () => {
+    const uiLanguage = uiLanguageSelect?.value === "tr" ? "tr" : "en";
     const provider = AI_PROVIDERS[providerSelect.value] ? providerSelect.value : DEFAULT_PROVIDER;
     const customBaseUrl = customBaseUrlInput.value.trim();
     const profile = AI_PROVIDERS[provider];
@@ -165,6 +190,7 @@ function initOptions() {
 
     await ensureHostPermission(provider, customBaseUrl);
     await chrome.storage.local.set({
+      uiLanguage,
       provider,
       customBaseUrl,
       apiKey,
@@ -179,7 +205,7 @@ function initOptions() {
     modelInput.value = model;
     primaryLanguageInput.value = primaryLanguage;
     secondaryLanguageInput.value = secondaryLanguage;
-    setStatus("Settings saved.", "ok");
+    setStatus(t(uiLanguage, "settingsSaved"), "ok");
   });
 
   testBtn.addEventListener("click", async () => {

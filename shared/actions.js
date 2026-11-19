@@ -105,6 +105,7 @@ export function resolveProviderConfig(provider = DEFAULT_PROVIDER, customBaseUrl
 }
 
 export const DEFAULT_SETTINGS = {
+  uiLanguage: "en",
   provider: DEFAULT_PROVIDER,
   customBaseUrl: "",
   apiKey: "",
@@ -255,6 +256,7 @@ export async function getSettings() {
   const provider = AI_PROVIDERS[data.provider] ? data.provider : DEFAULT_PROVIDER;
   const profile = AI_PROVIDERS[provider];
   return {
+    uiLanguage: data.uiLanguage === "tr" ? "tr" : "en",
     provider,
     customBaseUrl: (data.customBaseUrl || "").trim(),
     apiKey: (data.apiKey || "").trim(),

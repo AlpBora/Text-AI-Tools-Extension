@@ -5,6 +5,7 @@ import {
   getSettings,
   resolveProviderConfig
 } from "./shared/actions.js";
+import { t } from "./shared/i18n.js";
 
 export function getShortcutsUrl(
   userAgent = typeof navigator !== "undefined" ? navigator.userAgent : ""
@@ -186,11 +187,19 @@ export function initPopup() {
 
   async function refreshApiBanner() {
     try {
-      const { apiKey, provider, customBaseUrl, primaryLanguage, secondaryLanguage } = await getSettings();
+      const { uiLanguage, apiKey, provider, customBaseUrl, primaryLanguage, secondaryLanguage } = await getSettings();
+      const lang = uiLanguage === "tr" ? "tr" : "en";
+      document.querySelectorAll("[data-i18n]").forEach((el) => {
+        const k = el.getAttribute("data-i18n");
+        if (k) el.textContent = t(lang, k);
+      });
+      if (inputText) {
+        inputText.placeholder = t(lang, "popupTextPlaceholder");
+      }
       const providerCfg = resolveProviderConfig(provider, customBaseUrl);
       apiBanner.classList.toggle("hidden", !providerCfg.requiresKey || Boolean(apiKey));
       if (translateBtn) {
-        translateBtn.textContent = `Translate (${primaryLanguage} ↔ ${secondaryLanguage})`;
+        translateBtn.textContent = `${t(lang, "actionTranslate")} (${primaryLanguage} ↔ ${secondaryLanguage})`;
       }
     } catch {
       // Ignore transient storage errors on popup open

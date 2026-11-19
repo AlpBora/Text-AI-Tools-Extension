@@ -9,12 +9,20 @@
     <div class="header">
       <div class="title-wrap">
         <img src="icons/icon48.png" alt="Logo" />
-        <h1>Text AI Tools — Settings</h1>
+        <h1 data-i18n="settingsTitle">Text AI Tools — Settings</h1>
       </div>
     </div>
 
     <div class="card">
-      <label for="provider">AI Provider</label>
+      <label for="ui-language" data-i18n="uiLanguageLabel">Interface Language</label>
+      <select id="ui-language">
+        <option value="en">English</option>
+        <option value="tr">Türkçe</option>
+      </select>
+    </div>
+
+    <div class="card">
+      <label for="provider" data-i18n="providerLabel">AI Provider</label>
       <select id="provider">
         <option value="gemini">Google Gemini</option>
         <option value="openai">OpenAI</option>
@@ -27,21 +35,21 @@
         <label for="custom-base-url">Base URL (OpenAI-Compatible)</label>
         <input id="custom-base-url" type="text" placeholder="http://localhost:11434/v1" />
       </div>
-      <div class="hint">
+      <div class="hint" data-i18n="providerHint">
         Pasting an API key automatically detects common providers, or choose one manually.
       </div>
     </div>
 
     <div class="card">
-      <label for="api-key">API Key</label>
+      <label for="api-key" data-i18n="apiKeyLabel">API Key</label>
       <div class="row">
         <input id="api-key" type="password" placeholder="AIza..." />
-        <button id="toggle-key" class="btn" type="button">Show</button>
+        <button id="toggle-key" class="btn" type="button" data-i18n="showBtn">Show</button>
       </div>
-      <div class="hint">
+      <div class="hint" data-i18n="apiKeyHint">
         No API key is bundled in this extension. Sent only when you trigger an AI action.
       </div>
-      <div id="api-security-notice" class="security-notice" role="note">
+      <div id="api-security-notice" class="security-notice" role="note" data-i18n="localStorageNotice">
         <strong>Local Storage:</strong> Stored unencrypted in <code>chrome.storage.local</code> inside your browser profile; never exposed to web pages.
       </div>
     </div>
@@ -92,24 +100,24 @@
     </div>
 
     <div class="card">
-      <label>Local Spellchecking &amp; Editor Behavior</label>
+      <label data-i18n="behaviorTitle">Local Spellchecking &amp; Editor Behavior</label>
       <label class="checkbox-row">
         <input id="spellcheck-enabled" type="checkbox" />
-        <span>Enable offline word-end spellchecking &amp; Turkish suffix/ASCII rules (never calls Gemini while typing)</span>
+        <span data-i18n="spellcheckToggle">Enable offline word-end spellchecking &amp; Turkish suffix/ASCII rules (never calls AI while typing)</span>
       </label>
       <label class="checkbox-row">
         <input id="auto-correct-enabled" type="checkbox" />
-        <span>Auto-correct high-confidence typos &amp; Turkish ASCII words at word boundaries (with 1-step Undo)</span>
+        <span data-i18n="autoCorrectToggle">Auto-correct high-confidence typos &amp; Turkish ASCII words at word boundaries (with 1-step Undo)</span>
       </label>
       <label class="checkbox-row">
         <input id="copy-on-replace" type="checkbox" />
-        <span>Also copy to clipboard after replacing text</span>
+        <span data-i18n="copyOnReplaceToggle">Also copy to clipboard after replacing text</span>
       </label>
     </div>
 
     <div class="row">
-      <button id="save-btn" class="btn btn-primary" type="button">Save Settings</button>
-      <button id="test-btn" class="btn" type="button">Test Connection</button>
+      <button id="save-btn" class="btn btn-primary" type="button" data-i18n="saveSettingsBtn">Save Settings</button>
+      <button id="test-btn" class="btn" type="button" data-i18n="testConnectionBtn">Test Connection</button>
     </div>
     <div id="status" class="status"></div>
 

@@ -215,6 +215,7 @@ describe("M3 shared/actions.js (Gemini 3.5+ & retry logic)", () => {
 
     const defaults = await actions.getSettings();
     assert.deepEqual(defaults, {
+      uiLanguage: "en",
       provider: "gemini",
       customBaseUrl: "",
       apiKey: "",
@@ -239,6 +240,7 @@ describe("M3 shared/actions.js (Gemini 3.5+ & retry logic)", () => {
 
     const updated = await actions.getSettings();
     assert.deepEqual(updated, {
+      uiLanguage: "en",
       provider: "gemini",
       customBaseUrl: "",
       apiKey: "AIzaTestKey123",
