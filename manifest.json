@@ -77,5 +77,11 @@
     "concise": {
       "description": "Shorten Text (Keep Meaning)"
     }
-  }
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["shared/lexicons/*.json"],
+      "matches": ["<all_urls>"]
+    }
+  ]
 }

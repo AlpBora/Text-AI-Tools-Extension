@@ -107,6 +107,7 @@
   let isComposing = false;
 
   let toastTimer = null;
+  let contextToastTimer = null;
   let undoTimer = null;
   let selectionUpdateTimer = null;
   let habitSaveTimer = null;
@@ -114,6 +115,7 @@
   let activeUncertain = null; // { editor, word, span, candidates, sentence }
   let activeUndoState = null; // { editor, undoId, start, end, originalWord, correctedWord, boundaryChar }
   let activeMenuMode = null; // "uncertain" | "suggestions" | null
+  let activeModalCleanup = null;
 
   const userHabits = {
     corrections: Object.create(null),
@@ -136,6 +138,10 @@
       clearTimeout(toastTimer);
       toastTimer = null;
     }
+    if (contextToastTimer) {
+      clearTimeout(contextToastTimer);
+      contextToastTimer = null;
+    }
     if (undoTimer) {
       clearTimeout(undoTimer);
       undoTimer = null;
@@ -154,6 +160,15 @@
     stateRecord.active = false;
     contextInvalidated = true;
     clearAllTimers();
+
+    if (activeModalCleanup) {
+      try {
+        activeModalCleanup();
+      } catch {
+        // ignore
+      }
+      activeModalCleanup = null;
+    }
 
     if (activeUncertain?.editor && DomEditor) {
       try {
@@ -199,9 +214,17 @@
       runtimeMessageListener = null;
     }
 
-    if (removeHost && typeof document !== "undefined") {
+    if (typeof document !== "undefined") {
       try {
-        document.getElementById(HOST_ID)?.remove();
+        const host = document.getElementById(HOST_ID);
+        if (removeHost) {
+          host?.remove();
+        } else if (host?.shadowRoot) {
+          for (const slotId of ["slot-trigger", "slot-menu", "slot-undo", "text-tools-underlines"]) {
+            const slotEl = host.shadowRoot.getElementById(slotId);
+            if (slotEl) slotEl.innerHTML = "";
+          }
+        }
       } catch {
         // ignore
       }
@@ -218,10 +241,18 @@
         variant: "error",
         duration: 4500
       });
-      setTimeout(() => {
+      const invalidHost = typeof document !== "undefined" ? document.getElementById(HOST_ID) : null;
+      contextToastTimer = setTimeout(() => {
+        contextToastTimer = null;
         try {
-          if (!stateRecord.active) {
-            document.getElementById(HOST_ID)?.remove();
+          if (
+            globalThis.__TEXT_AI_TOOLS_STATE__ === stateRecord &&
+            !stateRecord.active &&
+            invalidHost &&
+            invalidHost.isConnected &&
+            document.getElementById(HOST_ID) === invalidHost
+          ) {
+            invalidHost.remove();
           }
         } catch {
           // ignore
@@ -229,7 +260,9 @@
       }, 4600);
     } catch {
       try {
-        document.getElementById(HOST_ID)?.remove();
+        if (globalThis.__TEXT_AI_TOOLS_STATE__ === stateRecord) {
+          document.getElementById(HOST_ID)?.remove();
+        }
       } catch {
         // ignore
       }
@@ -347,13 +380,6 @@
       }
     };
 
-    if (typeof onDone === "function") {
-      let syncResult;
-      run((res) => {
-        syncResult = res;
-      });
-      return Promise.resolve(syncResult);
-    }
     return new Promise(run);
   }
 
@@ -1213,6 +1239,14 @@
       clearTimeout(toastTimer);
       toastTimer = null;
     }
+    if (activeModalCleanup) {
+      try {
+        activeModalCleanup();
+      } catch {
+        // ignore
+      }
+      activeModalCleanup = null;
+    }
     const root = getShadowRoot();
     root.innerHTML = "";
     return root;
@@ -1321,13 +1355,20 @@
     backdrop.appendChild(modal);
     root.appendChild(backdrop);
 
-    const close = () => {
-      document.removeEventListener("keydown", onKeyDown);
-      backdrop.remove();
-    };
+    let closed = false;
     const onKeyDown = (e) => {
       if (e.key === "Escape") close();
     };
+    const close = () => {
+      if (closed) return;
+      closed = true;
+      document.removeEventListener("keydown", onKeyDown);
+      if (activeModalCleanup === close) {
+        activeModalCleanup = null;
+      }
+      backdrop.remove();
+    };
+    activeModalCleanup = close;
     document.addEventListener("keydown", onKeyDown);
 
     closeX.addEventListener("click", close);
@@ -2280,11 +2321,45 @@
   }
 
   // --- DOM Event Listeners ---
-  addManagedListener(document, "compositionstart", () => {
+  function isNodeInsideExtensionHost(node) {
+    if (!node || typeof node !== "object") return false;
+    if (node.id === HOST_ID) return true;
+    const host = typeof document !== "undefined" ? document.getElementById(HOST_ID) : null;
+    if (host && (node === host || host.contains?.(node) || host.shadowRoot?.contains?.(node))) {
+      return true;
+    }
+    if (typeof node.getRootNode === "function") {
+      try {
+        let root = node.getRootNode();
+        let guard = 0;
+        while (root && root.host && guard < 10) {
+          if (root.host.id === HOST_ID) return true;
+          root = typeof root.host.getRootNode === "function" ? root.host.getRootNode() : null;
+          guard += 1;
+        }
+      } catch {
+        // Ignore
+      }
+    }
+    return false;
+  }
+
+  function isEventInsideExtensionHost(e) {
+    if (!e) return false;
+    const path = typeof e.composedPath === "function" ? e.composedPath() : [];
+    if (path.some((node) => node && node.id === HOST_ID)) {
+      return true;
+    }
+    return isNodeInsideExtensionHost(e.target);
+  }
+
+  addManagedListener(document, "compositionstart", (e) => {
+    if (isEventInsideExtensionHost(e)) return;
     isComposing = true;
   });
 
-  addManagedListener(document, "compositionend", () => {
+  addManagedListener(document, "compositionend", (e) => {
+    if (isEventInsideExtensionHost(e)) return;
     isComposing = false;
   });
 
@@ -2297,6 +2372,7 @@
     "focusin",
     (e) => {
       if (!DomEditor || !isRuntimeContextAlive()) return;
+      if (isEventInsideExtensionHost(e)) return;
       const rawTarget = (typeof e.composedPath === "function" && e.composedPath()[0]) || e.target;
       const editor = DomEditor.resolveEditableTarget(rawTarget);
       if (!editor) return;
@@ -2365,6 +2441,8 @@
         hideUndoPill();
         return;
       }
+
+      if (isEventInsideExtensionHost(e)) return;
 
       const rawTarget = (typeof e.composedPath === "function" && e.composedPath()[0]) || e.target;
       const editor = DomEditor?.resolveEditableTarget(rawTarget);
@@ -2437,6 +2515,7 @@
       if (isApplyingExtensionEdit || isComposing || e.isComposing || !DomEditor || !isRuntimeContextAlive()) {
         return;
       }
+      if (isEventInsideExtensionHost(e)) return;
       const rawTarget = (typeof e.composedPath === "function" && e.composedPath()[0]) || e.target;
       const editor = DomEditor.resolveEditableTarget(rawTarget);
       if (!editor) return;
@@ -2497,16 +2576,20 @@
     true
   );
 
-  addManagedListener(document, "mouseup", () => {
+  addManagedListener(document, "mouseup", (e) => {
+    if (isEventInsideExtensionHost(e)) return;
     scheduleFloatingTriggerUpdate();
   });
 
   addManagedListener(document, "keyup", (e) => {
     if (e.key === "Escape") return;
+    if (isEventInsideExtensionHost(e)) return;
     scheduleFloatingTriggerUpdate();
   });
 
-  addManagedListener(document, "selectionchange", () => {
+  addManagedListener(document, "selectionchange", (e) => {
+    if (isEventInsideExtensionHost(e)) return;
+    if (document.activeElement?.id === HOST_ID) return;
     scheduleFloatingTriggerUpdate();
   });
 

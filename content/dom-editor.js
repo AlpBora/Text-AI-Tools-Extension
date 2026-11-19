@@ -149,10 +149,38 @@
     return false;
   }
 
+  function isInsideExtensionHost(node) {
+    if (!node || typeof node !== "object") return false;
+    if (node.id === SHADOW_HOST_ID) return true;
+    if (typeof node.getRootNode === "function") {
+      try {
+        let root = node.getRootNode();
+        let guard = 0;
+        while (root && root.host && guard < 10) {
+          if (root.host.id === SHADOW_HOST_ID) return true;
+          root = typeof root.host.getRootNode === "function" ? root.host.getRootNode() : null;
+          guard += 1;
+        }
+        return false;
+      } catch {
+        // Fall back to parent walk
+      }
+    }
+    let cur = node;
+    let guard = 0;
+    while (cur && guard < 32) {
+      if (cur.id === SHADOW_HOST_ID) return true;
+      cur = cur.parentNode || cur.host || null;
+      guard += 1;
+    }
+    return false;
+  }
+
   function resolveEditableTarget(node) {
     if (!node || typeof node !== "object") return null;
     const el = node.nodeType === 3 ? node.parentElement || node.parentNode : node;
     if (!el || !el.tagName || el.isConnected === false) return null;
+    if (isInsideExtensionHost(el)) return null;
 
     const tag = String(el.tagName).toUpperCase();
     if (tag === "TEXTAREA") {
@@ -1290,13 +1318,28 @@
     }
   }
 
+  function isHostConnectedToDoc(host, doc) {
+    if (!host) return false;
+    if (host.isConnected === false) return false;
+    if (host.isConnected === true) return true;
+    if (doc && typeof doc.contains === "function") {
+      if (host === doc.body || doc.contains(host)) return true;
+      const root = typeof host.getRootNode === "function" ? host.getRootNode() : null;
+      if (root && root.host) {
+        return isHostConnectedToDoc(root.host, doc);
+      }
+      return false;
+    }
+    return true;
+  }
+
   function replaceRangeSafely(el, snapshot, newText) {
     if (!el || !snapshot || typeof newText !== "string") return false;
     const host = resolveEditableTarget(el) || el;
     const doc = getDoc(host);
     const win = getWin(host);
 
-    if (doc && typeof doc.contains === "function" && host !== doc.body && !doc.contains(host)) {
+    if (isInsideExtensionHost(host) || !isHostConnectedToDoc(host, doc)) {
       return false;
     }
 
@@ -1489,6 +1532,7 @@
     resolveEditableTarget,
     getDeepActiveElement,
     getSelectionForNode,
+    getEffectiveSelectionRange,
     extractWordBeforeCaret,
     extractSentenceOrSelection,
     isCaretAtSentenceEnd,

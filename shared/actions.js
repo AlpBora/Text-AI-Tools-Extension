@@ -272,7 +272,7 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function parseStructuredJson(rawText) {
+function parseStructuredJson(rawText, providerLabel = "AI provider") {
   const trimmed = String(rawText || "").trim();
   try {
     return JSON.parse(trimmed);
@@ -285,7 +285,7 @@ function parseStructuredJson(rawText) {
         // Fall through to GeminiRequestError
       }
     }
-    throw new GeminiRequestError("Failed to parse structured JSON from Gemini response.", {
+    throw new GeminiRequestError(`Failed to parse structured JSON from ${providerLabel} response.`, {
       retryable: false
     });
   }
@@ -515,7 +515,8 @@ export async function fetchSentenceSuggestions({
     retryBaseDelayMs
   });
 
-  const parsed = parseStructuredJson(raw);
+  const providerCfg = resolveProviderConfig(provider, customBaseUrl);
+  const parsed = parseStructuredJson(raw, providerCfg.label);
   const allowedCategories = new Set(["grammar", "fluency", "professional"]);
   const rawOptions = Array.isArray(parsed?.options) ? parsed.options : [];
   const options = rawOptions
@@ -538,7 +539,7 @@ export async function fetchSentenceSuggestions({
     });
 
   if (options.length === 0) {
-    throw new GeminiRequestError("Gemini returned no valid sentence suggestions.", {
+    throw new GeminiRequestError(`${providerCfg.label} returned no valid sentence suggestions.`, {
       retryable: false
     });
   }
@@ -593,7 +594,8 @@ export async function fetchContextualWordSuggestions({
     retryBaseDelayMs
   });
 
-  const parsed = parseStructuredJson(raw);
+  const providerCfg = resolveProviderConfig(provider, customBaseUrl);
+  const parsed = parseStructuredJson(raw, providerCfg.label);
   const rawSuggestions = Array.isArray(parsed?.suggestions) ? parsed.suggestions : [];
   const suggestions = rawSuggestions
     .filter((item) => item && typeof item.word === "string" && item.word.trim())
@@ -606,7 +608,7 @@ export async function fetchContextualWordSuggestions({
     });
 
   if (suggestions.length === 0) {
-    throw new GeminiRequestError("Gemini returned no contextual word suggestions.", {
+    throw new GeminiRequestError(`${providerCfg.label} returned no contextual word suggestions.`, {
       retryable: false
     });
   }
