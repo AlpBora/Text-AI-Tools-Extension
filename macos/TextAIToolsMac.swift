@@ -730,6 +730,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         skipCb.frame = NSRect(x: 20, y: y, width: 370, height: 20)
         skipCb.state = skipBrowsers ? .on : .off
         skipCb.contentTintColor = .white
+        skipCb.attributedTitle = NSAttributedString(
+            string: "Skip Chromium/Orion Browsers (Use Browser Extension)",
+            attributes: [.foregroundColor: NSColor.white, .font: NSFont.systemFont(ofSize: 12)]
+        )
         generalView.addSubview(skipCb)
 
         y -= 24
@@ -737,6 +741,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         autoUpdCb.frame = NSRect(x: 20, y: y, width: 370, height: 20)
         autoUpdCb.state = autoUpdateEnabled ? .on : .off
         autoUpdCb.contentTintColor = .white
+        autoUpdCb.attributedTitle = NSAttributedString(
+            string: "Auto-Update in Background (5m local / 1h GitHub)",
+            attributes: [.foregroundColor: NSColor.white, .font: NSFont.systemFont(ofSize: 12)]
+        )
         generalView.addSubview(autoUpdCb)
 
         y -= 30
