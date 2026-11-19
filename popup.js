@@ -17,7 +17,132 @@ export function getShortcutsUrl(
   return null;
 }
 
-function initPopup() {
+export function sendRuntimeMessage(payload, { timeoutMs = 15000 } = {}) {
+  return new Promise((resolve) => {
+    if (!chrome?.runtime?.sendMessage) {
+      resolve({ ok: false, error: "Extension messaging unavailable." });
+      return;
+    }
+
+    let settled = false;
+    let timer = null;
+    const finish = (res) => {
+      if (settled) return;
+      settled = true;
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      resolve(res);
+    };
+
+    if (timeoutMs > 0) {
+      timer = setTimeout(() => {
+        finish({ ok: false, error: "Request timed out.", timedOut: true });
+      }, timeoutMs);
+    }
+
+    try {
+      const maybePromise = chrome.runtime.sendMessage(payload, (res) => {
+        const err = chrome.runtime?.lastError;
+        if (err) {
+          finish({ ok: false, error: err.message || String(err) });
+          return;
+        }
+        if (res === undefined) {
+          finish({ ok: false, error: "No response from extension background." });
+          return;
+        }
+        finish(res);
+      });
+      if (maybePromise && typeof maybePromise.then === "function") {
+        maybePromise.then(
+          (res) => {
+            if (res === undefined) {
+              finish({ ok: false, error: "No response from extension background." });
+            } else {
+              finish(res);
+            }
+          },
+          (err) => {
+            finish({ ok: false, error: err?.message || String(err) });
+          }
+        );
+      }
+    } catch (err) {
+      finish({ ok: false, error: err?.message || String(err) });
+    }
+  });
+}
+
+async function copyToClipboard(text) {
+  if (typeof navigator !== "undefined" && navigator?.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      // Fall through to execCommand fallback
+    }
+  }
+  if (typeof document === "undefined" || !document.body || typeof document.createElement !== "function") {
+    return false;
+  }
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select?.();
+    const ok = typeof document.execCommand === "function" ? Boolean(document.execCommand("copy")) : false;
+    ta.remove?.();
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
+async function openOptionsSafely() {
+  const fallback = async () => {
+    try {
+      if (chrome?.tabs?.create && chrome?.runtime?.getURL) {
+        await chrome.tabs.create({ url: chrome.runtime.getURL("options.html") });
+      }
+    } catch {
+      // ignore
+    }
+  };
+  if (typeof chrome?.runtime?.openOptionsPage !== "function") {
+    await fallback();
+    return;
+  }
+  let fellBack = false;
+  const triggerFallback = () => {
+    if (fellBack) return Promise.resolve();
+    fellBack = true;
+    return fallback();
+  };
+  try {
+    let syncErr = null;
+    const maybePromise = chrome.runtime.openOptionsPage(() => {
+      const err = chrome.runtime?.lastError;
+      if (err) {
+        syncErr = err;
+        void triggerFallback();
+      }
+    });
+    if (maybePromise && typeof maybePromise.then === "function") {
+      await maybePromise;
+    }
+    if (syncErr) {
+      await triggerFallback();
+    }
+  } catch {
+    await triggerFallback();
+  }
+}
+
+export function initPopup() {
   if (typeof document === "undefined") return;
 
   const apiBanner = document.getElementById("api-banner");
@@ -42,6 +167,12 @@ function initPopup() {
 
   if (!apiBanner || !inputText || !statusEl) return;
 
+  const shortcutsUrl = getShortcutsUrl();
+  if (!shortcutsUrl && openBrowserShortcutsBtn) {
+    openBrowserShortcutsBtn.classList?.add("hidden");
+    openBrowserShortcutsBtn.hidden = true;
+  }
+
   function setStatus(message, type = "") {
     statusEl.textContent = message;
     statusEl.className = `status ${type}`.trim();
@@ -54,11 +185,15 @@ function initPopup() {
   }
 
   async function refreshApiBanner() {
-    const { apiKey, provider, customBaseUrl, primaryLanguage, secondaryLanguage } = await getSettings();
-    const providerCfg = resolveProviderConfig(provider, customBaseUrl);
-    apiBanner.classList.toggle("hidden", !providerCfg.requiresKey || Boolean(apiKey));
-    if (translateBtn) {
-      translateBtn.textContent = `Translate (${primaryLanguage} ↔ ${secondaryLanguage})`;
+    try {
+      const { apiKey, provider, customBaseUrl, primaryLanguage, secondaryLanguage } = await getSettings();
+      const providerCfg = resolveProviderConfig(provider, customBaseUrl);
+      apiBanner.classList.toggle("hidden", !providerCfg.requiresKey || Boolean(apiKey));
+      if (translateBtn) {
+        translateBtn.textContent = `Translate (${primaryLanguage} ↔ ${secondaryLanguage})`;
+      }
+    } catch {
+      // Ignore transient storage errors on popup open
     }
   }
 
@@ -123,15 +258,19 @@ function initPopup() {
 
   copyOutputBtn?.addEventListener("click", async () => {
     if (!outputText.value) return;
-    await navigator.clipboard.writeText(outputText.value);
-    copyOutputBtn.textContent = "Copied ✓";
-    setTimeout(() => {
-      copyOutputBtn.textContent = "Copy";
-    }, 1500);
+    const copied = await copyToClipboard(outputText.value);
+    if (copied) {
+      copyOutputBtn.textContent = "Copied ✓";
+      setTimeout(() => {
+        copyOutputBtn.textContent = "Copy";
+      }, 1500);
+    } else {
+      setStatus("Copy failed — select and copy manually.", "err");
+    }
   });
 
   openOptionsBtn?.addEventListener("click", () => {
-    chrome.runtime.openOptionsPage();
+    void openOptionsSafely();
   });
 
   closeShortcutsBtn?.addEventListener("click", () => {
@@ -171,7 +310,8 @@ function initPopup() {
   });
 
   openBrowserShortcutsBtn?.addEventListener("click", async () => {
-    const url = getShortcutsUrl() || "chrome://extensions/shortcuts";
+    const url = getShortcutsUrl();
+    if (!url) return;
     try {
       const tab = await chrome.tabs.create({ url, active: true });
       if (tab?.id && !chrome.runtime?.lastError) {
@@ -181,10 +321,9 @@ function initPopup() {
     } catch {
       // Fallback below
     }
-    try {
-      await navigator.clipboard.writeText(url);
+    if (await copyToClipboard(url)) {
       setStatus(`Copied ${url} — paste it in Chromium address bar.`, "ok");
-    } catch {
+    } else {
       setStatus(`Open ${url} in a Chromium browser.`, "err");
     }
   });
@@ -221,11 +360,20 @@ function initPopup() {
     updateNowBtn.disabled = true;
     updateNowBtn.textContent = "Updating...";
     try {
-      const res = await chrome.runtime.sendMessage({ type: "checkAndReloadUpdate" });
+      const res = await sendRuntimeMessage({ type: "checkAndReloadUpdate" }, { timeoutMs: 15000 });
       if (res?.reloaded) {
         return;
       }
-      setStatus("Disk files not synced yet — opening GitHub.", "ok");
+      if (!res?.ok) {
+        setStatus(res?.error || "Could not check update.", "err");
+        return;
+      }
+      setStatus(
+        res.unsupportedReload
+          ? "Opening GitHub to download update."
+          : "Disk files not synced yet — opening GitHub.",
+        "ok"
+      );
       await chrome.tabs.create({
         url: "https://github.com/AlpBora/Text-AI-Tools-Extension",
         active: true
@@ -238,8 +386,8 @@ function initPopup() {
     }
   });
 
-  refreshUpdateBanner();
-  refreshApiBanner();
+  refreshUpdateBanner().catch(() => {});
+  refreshApiBanner().catch(() => {});
 }
 
 initPopup();

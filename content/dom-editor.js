@@ -152,7 +152,7 @@
   function resolveEditableTarget(node) {
     if (!node || typeof node !== "object") return null;
     const el = node.nodeType === 3 ? node.parentElement || node.parentNode : node;
-    if (!el || !el.tagName) return null;
+    if (!el || !el.tagName || el.isConnected === false) return null;
 
     const tag = String(el.tagName).toUpperCase();
     if (tag === "TEXTAREA") {
@@ -171,6 +171,7 @@
     // Check contenteditable / designMode
     const doc = el.ownerDocument;
     if (doc && doc.designMode === "on" && doc.body && !isExplicitlyNonEditable(el)) {
+      if (doc.body.isConnected === false) return null;
       return hasDisabledOrReadOnlyAttr(doc.body) ? null : doc.body;
     }
 
@@ -200,7 +201,7 @@
       }
     }
 
-    if (!editableHost) return null;
+    if (!editableHost || editableHost.isConnected === false) return null;
     if (hasDisabledOrReadOnlyAttr(editableHost)) return null;
     return editableHost;
   }
@@ -222,6 +223,64 @@
   function getWin(el) {
     const doc = getDoc(el);
     return doc?.defaultView || (typeof window !== "undefined" ? window : null);
+  }
+
+  function getDeepActiveElement(doc) {
+    const d = doc || (typeof document !== "undefined" ? document : null);
+    let active = d?.activeElement || null;
+    let guard = 0;
+    while (active && active.shadowRoot && active.shadowRoot.activeElement && guard < 10) {
+      if (active.id === SHADOW_HOST_ID) break;
+      active = active.shadowRoot.activeElement;
+      guard += 1;
+    }
+    return active;
+  }
+
+  function getSelectionForNode(node) {
+    const root = typeof node?.getRootNode === "function" ? node.getRootNode() : null;
+    if (root && root !== getDoc(node) && typeof root.getSelection === "function") {
+      try {
+        const srSel = root.getSelection();
+        if (srSel && srSel.rangeCount > 0) return srSel;
+      } catch {
+        // Ignore shadowRoot.getSelection errors
+      }
+    }
+    const win = getWin(node);
+    const doc = getDoc(node);
+    return (
+      (typeof win?.getSelection === "function" && win.getSelection()) ||
+      (typeof doc?.getSelection === "function" && doc.getSelection()) ||
+      null
+    );
+  }
+
+  function getEffectiveSelectionRange(host) {
+    const root = typeof host?.getRootNode === "function" ? host.getRootNode() : null;
+    const sel = getSelectionForNode(host);
+    if (!sel) return null;
+    const doc = getDoc(host);
+    if (root && root !== doc && typeof sel.getComposedRanges === "function") {
+      try {
+        const composed = sel.getComposedRanges({ shadowRoots: [root] });
+        if (Array.isArray(composed) && composed.length > 0 && composed[0]) {
+          const sr = composed[0];
+          if (doc && typeof doc.createRange === "function" && sr.startContainer && sr.endContainer) {
+            const r = doc.createRange();
+            r.setStart(sr.startContainer, sr.startOffset);
+            r.setEnd(sr.endContainer, sr.endOffset);
+            return { sel, range: r };
+          }
+        }
+      } catch {
+        // Fall back to standard selection range
+      }
+    }
+    if (sel.rangeCount > 0) {
+      return { sel, range: sel.getRangeAt(0) };
+    }
+    return null;
   }
 
   // --- ContentEditable Linear Text Model ---
@@ -384,15 +443,10 @@
 
     const model = buildContentEditableTextModel(host);
     const text = model.fullText;
-    const win = getWin(host);
-    const doc = getDoc(host);
-    const sel =
-      (typeof win?.getSelection === "function" && win.getSelection()) ||
-      (typeof doc?.getSelection === "function" && doc.getSelection()) ||
-      null;
+    const eff = getEffectiveSelectionRange(host);
 
-    if (sel && sel.rangeCount > 0) {
-      const r = sel.getRangeAt(0);
+    if (eff && eff.range) {
+      const r = eff.range;
       const startInside =
         r.startContainer === host ||
         (typeof host.contains === "function" && host.contains(r.startContainer));
@@ -979,28 +1033,61 @@
         }
       }
 
-      // Collapsed empty line fallback via temporary zero-width span
-      if (range.collapsed && doc && typeof doc.createElement === "function" && typeof range.insertNode === "function") {
-        const probe = doc.createElement("span");
-        probe.textContent = "\u200B";
-        try {
-          const cloned = typeof range.cloneRange === "function" ? range.cloneRange() : range;
-          cloned.insertNode(probe);
-          const pr = probe.getBoundingClientRect();
-          if (pr && (pr.height > 0 || pr.top > 0 || pr.left > 0)) {
+      // Collapsed empty line fallback: try startContainer element rect before temporary zero-width span
+      if (range.collapsed) {
+        if (
+          range.startContainer &&
+          range.startContainer.nodeType === 1 &&
+          typeof range.startContainer.getBoundingClientRect === "function"
+        ) {
+          const er = range.startContainer.getBoundingClientRect();
+          if (er && er.height > 0 && er.height <= 44) {
             return {
-              top: pr.top,
-              left: pr.left,
-              bottom: pr.bottom,
-              right: pr.right,
-              width: pr.width,
-              height: pr.height || 18
+              top: er.top,
+              left: er.left,
+              bottom: er.bottom,
+              right: er.left + 2,
+              width: 2,
+              height: er.height
             };
           }
-        } catch {
-          // ignore probe error
-        } finally {
-          probe.remove();
+        }
+        if (doc && typeof doc.createElement === "function" && typeof range.insertNode === "function") {
+          const probe = doc.createElement("span");
+          probe.textContent = "\u200B";
+          const sel = getSelectionForNode(host);
+          let savedCaretRange = null;
+          if (sel && sel.rangeCount > 0) {
+            const cur = sel.getRangeAt(0);
+            savedCaretRange = typeof cur.cloneRange === "function" ? cur.cloneRange() : cur;
+          }
+          try {
+            const cloned = typeof range.cloneRange === "function" ? range.cloneRange() : range;
+            cloned.insertNode(probe);
+            const pr = probe.getBoundingClientRect();
+            if (pr && (pr.height > 0 || pr.top > 0 || pr.left > 0)) {
+              return {
+                top: pr.top,
+                left: pr.left,
+                bottom: pr.bottom,
+                right: pr.right,
+                width: pr.width,
+                height: pr.height || 18
+              };
+            }
+          } catch {
+            // ignore probe error
+          } finally {
+            probe.remove();
+            if (sel && savedCaretRange) {
+              try {
+                sel.removeAllRanges();
+                sel.addRange(savedCaretRange);
+              } catch {
+                // ignore selection restore error
+              }
+            }
+          }
         }
       }
     }
@@ -1323,10 +1410,7 @@
     }
 
     host.focus?.();
-    const sel =
-      (typeof win?.getSelection === "function" && win.getSelection()) ||
-      (typeof doc?.getSelection === "function" && doc.getSelection()) ||
-      null;
+    const sel = getSelectionForNode(host);
 
     if (sel) {
       sel.removeAllRanges();
@@ -1337,9 +1421,10 @@
     const delta = newText.length - origLen;
     let applied = false;
 
+    const deepActive = getDeepActiveElement(doc);
     if (
       typeof doc?.execCommand === "function" &&
-      (!doc.activeElement || doc.activeElement === host || host.contains?.(doc.activeElement))
+      (!deepActive || deepActive === host || host.contains?.(deepActive))
     ) {
       try {
         const ok = doc.execCommand("insertText", false, newText);
@@ -1402,6 +1487,8 @@
   const DomEditor = {
     isEligibleEditor,
     resolveEditableTarget,
+    getDeepActiveElement,
+    getSelectionForNode,
     extractWordBeforeCaret,
     extractSentenceOrSelection,
     isCaretAtSentenceEnd,

@@ -1,9 +1,81 @@
 (() => {
   "use strict";
 
-  if (globalThis.__TEXT_AI_TOOLS_CONTENT_INIT__) {
-    return;
+  const HOST_ID = "text-tools-shadow-host";
+  const LEXICON_TIMEOUT_MS = 4000;
+  const LEXICON_RETRY_COOLDOWN_MS = 15000;
+
+  function readRuntimeId() {
+    try {
+      return chrome?.runtime?.id;
+    } catch {
+      return null;
+    }
   }
+
+  const initialRuntimeId = readRuntimeId();
+  const hasExplicitRuntimeId = typeof initialRuntimeId === "string" && initialRuntimeId.length > 0;
+  const runtimeStateKey = hasExplicitRuntimeId ? initialRuntimeId : "__mock__";
+
+  const prevState = globalThis.__TEXT_AI_TOOLS_STATE__;
+  if (prevState) {
+    const stillAlive =
+      prevState.active &&
+      prevState.runtimeId === runtimeStateKey &&
+      (typeof prevState.isAlive === "function" ? prevState.isAlive() : true);
+    if (stillAlive) {
+      return;
+    }
+    if (typeof prevState.cleanup === "function") {
+      try {
+        prevState.cleanup();
+      } catch {
+        // Ignore cleanup errors from prior invalidated instance
+      }
+    }
+  }
+
+  // Also clean up any orphaned shadow host from a previous isolated-world injection
+  try {
+    const orphanHost = typeof document !== "undefined" ? document.getElementById(HOST_ID) : null;
+    if (orphanHost && !globalThis.__TEXT_AI_TOOLS_STATE__?.active) {
+      orphanHost.remove();
+    }
+  } catch {
+    // Ignore DOM cleanup errors
+  }
+
+  let contextInvalidated = false;
+  function isRuntimeContextAlive() {
+    if (contextInvalidated) return false;
+    if (!hasExplicitRuntimeId) return Boolean(chrome?.runtime);
+    return readRuntimeId() === initialRuntimeId;
+  }
+
+  function isContextInvalidatedError(errOrMsg) {
+    const msg = String(errOrMsg?.message || errOrMsg || "").toLowerCase();
+    return msg.includes("extension context invalidated") || msg.includes("context invalidated");
+  }
+
+  const abortController = typeof AbortController === "function" ? new AbortController() : null;
+  const managedListeners = [];
+  let storageChangedListener = null;
+  let runtimeMessageListener = null;
+
+  function addManagedListener(target, type, fn, capture = false) {
+    if (!target || typeof target.addEventListener !== "function") return;
+    if (abortController) {
+      try {
+        target.addEventListener(type, fn, { capture: Boolean(capture), signal: abortController.signal });
+      } catch {
+        target.addEventListener(type, fn, Boolean(capture));
+      }
+    } else {
+      target.addEventListener(type, fn, Boolean(capture));
+    }
+    managedListeners.push({ target, type, fn, capture: Boolean(capture) });
+  }
+
   globalThis.__TEXT_AI_TOOLS_CONTENT_INIT__ = true;
   if (typeof window !== "undefined") {
     window.__textToolsLoaded = true;
@@ -16,8 +88,6 @@
   const PersonalModel = Tools.PersonalModel;
   const UndoManager = Tools.UndoManager;
 
-  const HOST_ID = "text-tools-shadow-host";
-
   const settings = {
     spellcheckEnabled: true,
     autoCorrectEnabled: true,
@@ -28,6 +98,7 @@
 
   const lexiconsByLang = Object.create(null);
   const lexiconPending = new Map();
+  const lexiconCooldownUntil = new Map();
   let lexiconsInitialized = false;
 
   let activeEditor = null;
@@ -53,6 +124,239 @@
     charEdits: Object.create(null)
   };
 
+  function getDeepActiveElement() {
+    if (DomEditor && typeof DomEditor.getDeepActiveElement === "function") {
+      return DomEditor.getDeepActiveElement(document);
+    }
+    return document.activeElement || null;
+  }
+
+  function clearAllTimers() {
+    if (toastTimer) {
+      clearTimeout(toastTimer);
+      toastTimer = null;
+    }
+    if (undoTimer) {
+      clearTimeout(undoTimer);
+      undoTimer = null;
+    }
+    if (selectionUpdateTimer) {
+      clearTimeout(selectionUpdateTimer);
+      selectionUpdateTimer = null;
+    }
+    if (habitSaveTimer) {
+      clearTimeout(habitSaveTimer);
+      habitSaveTimer = null;
+    }
+  }
+
+  function teardownInstance({ removeHost = true } = {}) {
+    stateRecord.active = false;
+    contextInvalidated = true;
+    clearAllTimers();
+
+    if (activeUncertain?.editor && DomEditor) {
+      try {
+        DomEditor.setUncertainUnderline(activeUncertain.editor, null);
+      } catch {
+        // ignore
+      }
+    }
+    activeUncertain = null;
+    activeUndoState = null;
+    activeMenuMode = null;
+    activeEditor = null;
+    savedSelection = null;
+
+    if (abortController) {
+      try {
+        abortController.abort();
+      } catch {
+        // ignore
+      }
+    }
+    for (const entry of managedListeners.splice(0)) {
+      try {
+        entry.target.removeEventListener?.(entry.type, entry.fn, entry.capture);
+      } catch {
+        // ignore
+      }
+    }
+    if (storageChangedListener) {
+      try {
+        chrome?.storage?.onChanged?.removeListener?.(storageChangedListener);
+      } catch {
+        // ignore
+      }
+      storageChangedListener = null;
+    }
+    if (runtimeMessageListener) {
+      try {
+        chrome?.runtime?.onMessage?.removeListener?.(runtimeMessageListener);
+      } catch {
+        // ignore
+      }
+      runtimeMessageListener = null;
+    }
+
+    if (removeHost && typeof document !== "undefined") {
+      try {
+        document.getElementById(HOST_ID)?.remove();
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  function handleContextInvalidated() {
+    if (!stateRecord.active) return;
+    teardownInstance({ removeHost: false });
+    globalThis.__TEXT_AI_TOOLS_CONTENT_INIT__ = false;
+    try {
+      showToast({
+        message: "Text AI Tools was reloaded. Refresh this page to continue.",
+        variant: "error",
+        duration: 4500
+      });
+      setTimeout(() => {
+        try {
+          if (!stateRecord.active) {
+            document.getElementById(HOST_ID)?.remove();
+          }
+        } catch {
+          // ignore
+        }
+      }, 4600);
+    } catch {
+      try {
+        document.getElementById(HOST_ID)?.remove();
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  const stateRecord = {
+    active: true,
+    runtimeId: runtimeStateKey,
+    isAlive: isRuntimeContextAlive,
+    cleanup: () => teardownInstance({ removeHost: true })
+  };
+  globalThis.__TEXT_AI_TOOLS_STATE__ = stateRecord;
+
+  function sendRuntimeMessage(payload, { timeoutMs = 30000 } = {}, onDone = null) {
+    const run = (resolve) => {
+      if (!isRuntimeContextAlive()) {
+        handleContextInvalidated();
+        const errRes = {
+          ok: false,
+          error: "Extension context invalidated. Refresh the page to continue.",
+          contextInvalidated: true
+        };
+        if (onDone) onDone(errRes);
+        resolve(errRes);
+        return;
+      }
+
+      if (!chrome?.runtime?.sendMessage) {
+        const errRes = { ok: false, error: "Extension messaging unavailable." };
+        if (onDone) onDone(errRes);
+        resolve(errRes);
+        return;
+      }
+
+      let settled = false;
+      let timer = null;
+      const finish = (res) => {
+        if (settled) return;
+        settled = true;
+        if (timer) {
+          clearTimeout(timer);
+          timer = null;
+        }
+        if (res?.contextInvalidated) {
+          handleContextInvalidated();
+        }
+        if (onDone) onDone(res);
+        resolve(res);
+      };
+
+      if (timeoutMs > 0) {
+        timer = setTimeout(() => {
+          finish({ ok: false, error: "Request timed out. Please try again.", timedOut: true });
+        }, timeoutMs);
+      }
+
+      try {
+        const maybePromise = chrome.runtime.sendMessage(payload, (res) => {
+          const lastErr = chrome.runtime?.lastError;
+          if (lastErr) {
+            const msg = lastErr.message || String(lastErr);
+            if (isContextInvalidatedError(msg)) {
+              finish({
+                ok: false,
+                error: "Extension context invalidated. Refresh the page to continue.",
+                contextInvalidated: true
+              });
+              return;
+            }
+            finish({ ok: false, error: msg });
+            return;
+          }
+          if (res === undefined) {
+            finish({ ok: false, error: "No response from extension background." });
+            return;
+          }
+          finish(res);
+        });
+
+        if (maybePromise && typeof maybePromise.then === "function") {
+          maybePromise.then(
+            (res) => {
+              if (res === undefined) {
+                finish({ ok: false, error: "No response from extension background." });
+              } else {
+                finish(res);
+              }
+            },
+            (err) => {
+              const msg = err?.message || String(err);
+              if (isContextInvalidatedError(msg)) {
+                finish({
+                  ok: false,
+                  error: "Extension context invalidated. Refresh the page to continue.",
+                  contextInvalidated: true
+                });
+              } else {
+                finish({ ok: false, error: msg });
+              }
+            }
+          );
+        }
+      } catch (err) {
+        const msg = err?.message || String(err);
+        if (isContextInvalidatedError(msg)) {
+          finish({
+            ok: false,
+            error: "Extension context invalidated. Refresh the page to continue.",
+            contextInvalidated: true
+          });
+        } else {
+          finish({ ok: false, error: msg });
+        }
+      }
+    };
+
+    if (typeof onDone === "function") {
+      let syncResult;
+      run((res) => {
+        syncResult = res;
+      });
+      return Promise.resolve(syncResult);
+    }
+    return new Promise(run);
+  }
+
   function getCurrentDomain() {
     try {
       return String(window.location?.hostname || "").trim().toLowerCase();
@@ -72,12 +376,36 @@
       .normalize("NFC");
   }
 
+  function mergeUserHabits(rawHabits) {
+    if (!rawHabits || typeof rawHabits !== "object") return;
+    if (rawHabits.corrections && typeof rawHabits.corrections === "object") {
+      Object.assign(userHabits.corrections, rawHabits.corrections);
+    }
+    if (rawHabits.wordCounts && typeof rawHabits.wordCounts === "object") {
+      Object.assign(userHabits.wordCounts, rawHabits.wordCounts);
+    }
+    if (rawHabits.ignored && typeof rawHabits.ignored === "object") {
+      Object.assign(userHabits.ignored, rawHabits.ignored);
+    }
+    if (rawHabits.bigrams && typeof rawHabits.bigrams === "object") {
+      Object.assign(userHabits.bigrams, rawHabits.bigrams);
+    }
+    if (rawHabits.domainCounts && typeof rawHabits.domainCounts === "object") {
+      Object.assign(userHabits.domainCounts, rawHabits.domainCounts);
+    }
+    if (rawHabits.charEdits && typeof rawHabits.charEdits === "object") {
+      Object.assign(userHabits.charEdits, rawHabits.charEdits);
+    }
+  }
+
   function saveUserHabitsDebounced() {
+    if (!isRuntimeContextAlive()) return;
     if (habitSaveTimer) clearTimeout(habitSaveTimer);
     habitSaveTimer = setTimeout(() => {
       habitSaveTimer = null;
+      if (!isRuntimeContextAlive()) return;
       try {
-        if (!chrome?.storage?.local) return;
+        if (!chrome?.storage?.local?.set) return;
         const payload = PersonalModel
           ? PersonalModel.pruneHabits(userHabits)
           : {
@@ -88,9 +416,23 @@
               domainCounts: { ...userHabits.domainCounts },
               charEdits: { ...userHabits.charEdits }
             };
-        chrome.storage.local.set({ userHabits: payload });
-      } catch {
-        // Ignore storage write errors
+        const res = chrome.storage.local.set({ userHabits: payload }, () => {
+          const err = chrome.runtime?.lastError;
+          if (err && isContextInvalidatedError(err.message || err)) {
+            handleContextInvalidated();
+          }
+        });
+        if (res && typeof res.catch === "function") {
+          res.catch((err) => {
+            if (isContextInvalidatedError(err)) {
+              handleContextInvalidated();
+            }
+          });
+        }
+      } catch (err) {
+        if (isContextInvalidatedError(err)) {
+          handleContextInvalidated();
+        }
       }
     }, 400);
   }
@@ -146,6 +488,7 @@
 
   // --- Storage & Lazy Lexicon Loading ---
   function loadSettings() {
+    if (!isRuntimeContextAlive()) return;
     try {
       if (!chrome?.storage?.local) return;
       chrome.storage.local.get(
@@ -164,30 +507,13 @@
           settings.primaryLanguage = String(data.primaryLanguage || "Turkish").trim() || "Turkish";
           settings.secondaryLanguage = String(data.secondaryLanguage || "English").trim() || "English";
           settings.copyOnReplace = Boolean(data.copyOnReplace);
-          if (data.userHabits && typeof data.userHabits === "object") {
-            if (data.userHabits.corrections && typeof data.userHabits.corrections === "object") {
-              Object.assign(userHabits.corrections, data.userHabits.corrections);
-            }
-            if (data.userHabits.wordCounts && typeof data.userHabits.wordCounts === "object") {
-              Object.assign(userHabits.wordCounts, data.userHabits.wordCounts);
-            }
-            if (data.userHabits.ignored && typeof data.userHabits.ignored === "object") {
-              Object.assign(userHabits.ignored, data.userHabits.ignored);
-            }
-            if (data.userHabits.bigrams && typeof data.userHabits.bigrams === "object") {
-              Object.assign(userHabits.bigrams, data.userHabits.bigrams);
-            }
-            if (data.userHabits.domainCounts && typeof data.userHabits.domainCounts === "object") {
-              Object.assign(userHabits.domainCounts, data.userHabits.domainCounts);
-            }
-            if (data.userHabits.charEdits && typeof data.userHabits.charEdits === "object") {
-              Object.assign(userHabits.charEdits, data.userHabits.charEdits);
-            }
-          }
+          mergeUserHabits(data.userHabits);
         }
       );
-    } catch {
-      // Ignore outside extension context
+    } catch (err) {
+      if (isContextInvalidatedError(err)) {
+        handleContextInvalidated();
+      }
     }
   }
 
@@ -206,46 +532,86 @@
     return ids;
   }
 
-  function fetchLexicon(langId) {
+  function fetchLexicon(langId, { bypassCooldown = false } = {}) {
     if (!langId) return Promise.resolve(null);
     if (lexiconsByLang[langId]) return Promise.resolve(lexiconsByLang[langId]);
     if (lexiconPending.has(langId)) return lexiconPending.get(langId);
-
-    if (!chrome?.runtime?.sendMessage) {
+    if (!bypassCooldown && Date.now() < (lexiconCooldownUntil.get(langId) || 0)) {
+      return Promise.resolve(null);
+    }
+    if (!isRuntimeContextAlive()) {
       return Promise.resolve(null);
     }
 
+    let syncLoaded = null;
+    let resolvedSync = false;
+
+    const fallbackLoad = async () => {
+      if (
+        typeof fetch === "function" &&
+        typeof chrome?.runtime?.getURL === "function" &&
+        isRuntimeContextAlive()
+      ) {
+        try {
+          const url = chrome.runtime.getURL(`shared/lexicons/${encodeURIComponent(langId)}.json`);
+          const resp = await fetch(url);
+          if (resp && resp.ok) {
+            const data = await resp.json();
+            if (data) {
+              lexiconsByLang[langId] = data;
+              lexiconCooldownUntil.delete(langId);
+              lexiconsInitialized = hasAllActiveLexiconsLoaded();
+              return data;
+            }
+          }
+        } catch {
+          // Ignore fallback fetch errors
+        }
+      }
+      lexiconCooldownUntil.set(langId, Date.now() + LEXICON_RETRY_COOLDOWN_MS);
+      return null;
+    };
+
     const promise = new Promise((resolve) => {
-      try {
-        chrome.runtime.sendMessage({ type: "getLexicon", lang: langId }, (res) => {
-          if (chrome.runtime?.lastError) {
+      sendRuntimeMessage(
+        { type: "getLexicon", lang: langId },
+        { timeoutMs: LEXICON_TIMEOUT_MS },
+        (res) => {
+          if (res && res.ok && res.data) {
+            lexiconsByLang[langId] = res.data;
+            lexiconCooldownUntil.delete(langId);
+            lexiconsInitialized = hasAllActiveLexiconsLoaded();
+            syncLoaded = res.data;
+            resolvedSync = true;
+            resolve(res.data);
+            return;
+          }
+          if (res?.contextInvalidated) {
             resolve(null);
             return;
           }
-          if (res && res.ok && res.data) {
-            lexiconsByLang[langId] = res.data;
-            resolve(res.data);
-          } else {
-            resolve(null);
-          }
-        });
-      } catch {
-        resolve(null);
-      }
+          fallbackLoad().then(resolve, () => resolve(null));
+        }
+      );
     }).finally(() => {
       lexiconPending.delete(langId);
     });
 
+    if (resolvedSync) {
+      return Promise.resolve(syncLoaded);
+    }
     lexiconPending.set(langId, promise);
     return promise;
   }
 
-  function ensureLexiconsForActiveLanguages() {
-    lexiconsInitialized = true;
+  function ensureLexiconsForActiveLanguages({ bypassCooldown = false } = {}) {
     const langIds = getActiveBundledLangIds();
     const missing = langIds.filter((id) => !lexiconsByLang[id]);
-    if (missing.length === 0) return Promise.resolve();
-    return Promise.all(missing.map((id) => fetchLexicon(id)));
+    if (missing.length === 0) {
+      lexiconsInitialized = true;
+      return Promise.resolve();
+    }
+    return Promise.all(missing.map((id) => fetchLexicon(id, { bypassCooldown })));
   }
 
   function hasAllActiveLexiconsLoaded() {
@@ -644,7 +1010,8 @@
           font-size: 11px;
           color: #6b7280;
         }
-        .inline-status {
+        .inline-status,
+        .loading-row {
           display: flex;
           align-items: center;
           gap: 8px;
@@ -893,7 +1260,7 @@
       btn.textContent = "Open Settings";
       preventBlurOnMouseDown(btn);
       btn.addEventListener("click", () => {
-        chrome.runtime.sendMessage({ type: "openOptions" });
+        void sendRuntimeMessage({ type: "openOptions" }, { timeoutMs: 5000 });
         clearRoot();
       });
       toast.appendChild(btn);
@@ -1009,6 +1376,7 @@
   function isUndoStateStillValid(state) {
     if (!state || !state.editor || !DomEditor) return false;
     const editor = state.editor;
+    if (editor.isConnected === false) return false;
     const fullText =
       editor.tagName === "INPUT" || editor.tagName === "TEXTAREA"
         ? String(editor.value ?? "")
@@ -1134,6 +1502,7 @@
   function isUncertainSpanStillValid(state) {
     if (!state || !state.editor || !DomEditor) return false;
     const editor = state.editor;
+    if (editor.isConnected === false) return false;
     if (editor.tagName === "INPUT" || editor.tagName === "TEXTAREA") {
       const val = String(editor.value ?? "");
       return val.slice(state.span.start, state.span.end) === state.word;
@@ -1261,12 +1630,12 @@
       pop.appendChild(list);
     }
 
-    // Manual-only Gemini Contextual Word Lookup button
+    // Manual-only Contextual Word Lookup button
     const ctxBtn = document.createElement("button");
     ctxBtn.type = "button";
     ctxBtn.className = "gemini-context-btn";
     ctxBtn.setAttribute("data-action", "ask-gemini-context");
-    ctxBtn.setAttribute("aria-label", "Ask Gemini (Context) — Bağlamdan Kelime Bul");
+    ctxBtn.setAttribute("aria-label", "Ask AI (Context) — Bağlamdan Kelime Bul");
     ctxBtn.textContent = "✨ Ask Gemini (Context)";
     preventBlurOnMouseDown(ctxBtn);
 
@@ -1281,14 +1650,14 @@
       const sp = document.createElement("div");
       sp.className = "spinner-dark";
       const stTxt = document.createElement("span");
-      stTxt.textContent = "Searching context with Gemini...";
+      stTxt.textContent = "Searching context with AI...";
       status.appendChild(sp);
       status.appendChild(stTxt);
       ctxResults.appendChild(status);
 
       const liveSentence = getLiveSentenceForUncertain(uncertainState);
 
-      chrome.runtime.sendMessage(
+      sendRuntimeMessage(
         {
           type: "geminiContextualWord",
           sentence: liveSentence,
@@ -1296,14 +1665,15 @@
           primaryLang: settings.primaryLanguage,
           secondaryLang: settings.secondaryLanguage
         },
+        { timeoutMs: 90000 },
         (res) => {
           ctxBtn.disabled = false;
           ctxResults.innerHTML = "";
-          if (chrome.runtime?.lastError || !res || !res.ok) {
+          if (!res || !res.ok) {
             const errBox = document.createElement("div");
             errBox.className = "inline-error";
             const msg = document.createElement("span");
-            msg.textContent = res?.error || chrome.runtime?.lastError?.message || "Gemini lookup failed.";
+            msg.textContent = res?.error || "AI context lookup failed.";
             errBox.appendChild(msg);
             if (res?.openOptions) {
               const optBtn = document.createElement("button");
@@ -1311,7 +1681,9 @@
               optBtn.className = "inline-settings-btn";
               optBtn.textContent = "Open Settings";
               preventBlurOnMouseDown(optBtn);
-              optBtn.addEventListener("click", () => chrome.runtime.sendMessage({ type: "openOptions" }));
+              optBtn.addEventListener("click", () => {
+                void sendRuntimeMessage({ type: "openOptions" }, { timeoutMs: 5000 });
+              });
               errBox.appendChild(optBtn);
             }
             ctxResults.appendChild(errBox);
@@ -1385,6 +1757,7 @@
 
   function openSentenceSuggestionMenu(editor, extraction, anchorPos) {
     if (!extraction || !extraction.text) return;
+    clearUncertainState({ keepMenuIfSuggestion: true });
     activeMenuMode = "suggestions";
 
     const slot = getSlot("slot-menu");
@@ -1444,7 +1817,9 @@
         optBtn.className = "inline-settings-btn";
         optBtn.textContent = "Open Settings";
         preventBlurOnMouseDown(optBtn);
-        optBtn.addEventListener("click", () => chrome.runtime.sendMessage({ type: "openOptions" }));
+        optBtn.addEventListener("click", () => {
+          void sendRuntimeMessage({ type: "openOptions" }, { timeoutMs: 5000 });
+        });
         errBox.appendChild(optBtn);
       }
       bodyContainer.appendChild(errBox);
@@ -1495,7 +1870,7 @@
 
     const runSingleAction = (actionId, label) => {
       renderLoading(`Running ${label}...`);
-      chrome.runtime.sendMessage(
+      sendRuntimeMessage(
         {
           type: "geminiInlineAction",
           actionId,
@@ -1503,13 +1878,11 @@
           primaryLang: settings.primaryLanguage,
           secondaryLang: settings.secondaryLanguage
         },
+        { timeoutMs: 90000 },
         (res) => {
           if (activeMenuMode !== "suggestions") return;
-          if (chrome.runtime?.lastError || !res || !res.ok) {
-            renderError(
-              res?.error || chrome.runtime?.lastError?.message || "Gemini request failed.",
-              res?.openOptions
-            );
+          if (!res || !res.ok) {
+            renderError(res?.error || "AI request failed.", res?.openOptions);
             return;
           }
 
@@ -1559,7 +1932,7 @@
 
     const runThreeOptions = () => {
       renderLoading("Getting 3 options...");
-      chrome.runtime.sendMessage(
+      sendRuntimeMessage(
         {
           type: "geminiSentenceSuggestions",
           text: extraction.text,
@@ -1567,14 +1940,12 @@
           primaryLang: settings.primaryLanguage,
           secondaryLang: settings.secondaryLanguage
         },
+        { timeoutMs: 90000 },
         (res) => {
           if (activeMenuMode !== "suggestions") return;
           bodyContainer.innerHTML = "";
-          if (chrome.runtime?.lastError || !res || !res.ok) {
-            renderError(
-              res?.error || chrome.runtime?.lastError?.message || "Failed to fetch suggestions.",
-              res?.openOptions
-            );
+          if (!res || !res.ok) {
+            renderError(res?.error || "Failed to fetch suggestions.", res?.openOptions);
             return;
           }
 
@@ -1613,7 +1984,7 @@
       );
     };
 
-    // Render direct action choices immediately (ZERO Gemini calls until clicked!)
+    // Render direct action choices immediately (ZERO AI calls until clicked!)
     const grid = document.createElement("div");
     grid.className = "action-grid";
 
@@ -1647,31 +2018,50 @@
     bodyContainer.appendChild(grid);
 
     const qaHistory = [];
-    const renderQAView = (errorMsg = "") => {
+    const renderQAView = (errorMsg = "", { openOptions = false } = {}) => {
       bodyContainer.innerHTML = "";
-      const thread = document.createElement("div");
-      thread.className = "ask-answer";
-      if (errorMsg) {
-        thread.style.color = "#fecaca";
-        thread.textContent = errorMsg;
-      } else {
+      if (qaHistory.length > 0) {
+        const thread = document.createElement("div");
+        thread.className = "ask-answer";
+        preventBlurOnMouseDown(thread);
         thread.textContent = qaHistory
           .map((item) => (item.role === "user" ? `› ${item.text}` : item.text))
           .join("\n\n");
+        bodyContainer.appendChild(thread);
+        thread.scrollTop = thread.scrollHeight;
       }
-      bodyContainer.appendChild(thread);
-      thread.scrollTop = thread.scrollHeight;
+
+      if (errorMsg) {
+        const errBox = document.createElement("div");
+        errBox.className = "inline-error ask-error";
+        const msg = document.createElement("span");
+        msg.textContent = errorMsg;
+        errBox.appendChild(msg);
+        if (openOptions) {
+          const optBtn = document.createElement("button");
+          optBtn.type = "button";
+          optBtn.className = "inline-settings-btn";
+          optBtn.textContent = "Open Settings";
+          preventBlurOnMouseDown(optBtn);
+          optBtn.addEventListener("click", () => {
+            void sendRuntimeMessage({ type: "openOptions" }, { timeoutMs: 5000 });
+          });
+          errBox.appendChild(optBtn);
+        }
+        bodyContainer.appendChild(errBox);
+      }
 
       const followForm = document.createElement("form");
       followForm.className = "ask-form";
       const followInput = document.createElement("input");
       followInput.type = "text";
       followInput.className = "ask-input";
-      followInput.placeholder = "Ask follow-up…";
+      followInput.placeholder = qaHistory.length > 0 ? "Ask follow-up…" : "Ask AI about this…";
       const followSend = document.createElement("button");
       followSend.type = "submit";
       followSend.className = "ask-send";
       followSend.textContent = "→";
+      preventBlurOnMouseDown(followSend);
       followForm.appendChild(followInput);
       followForm.appendChild(followSend);
       followForm.addEventListener("submit", (ev) => {
@@ -1684,24 +2074,39 @@
 
     const submitQuestion = async (q) => {
       if (!q) return;
-      bodyContainer.innerHTML = `<div class="loading-row"><div class="spinner"></div><span>Thinking…</span></div>`;
+      bodyContainer.innerHTML = "";
+      const loadingRow = document.createElement("div");
+      loadingRow.className = "loading-row";
+      const sp = document.createElement("div");
+      sp.className = "spinner";
+      const lbl = document.createElement("span");
+      lbl.textContent = "Thinking…";
+      loadingRow.appendChild(sp);
+      loadingRow.appendChild(lbl);
+      bodyContainer.appendChild(loadingRow);
+
       try {
-        const res = await chrome.runtime.sendMessage({
-          type: "askAIQuestion",
-          question: q,
-          text: extraction.text,
-          history: qaHistory,
-          primaryLang: settings.primaryLanguage,
-          secondaryLang: settings.secondaryLanguage
-        });
+        const res = await sendRuntimeMessage(
+          {
+            type: "askAIQuestion",
+            question: q,
+            text: extraction.text,
+            history: qaHistory,
+            primaryLang: settings.primaryLanguage,
+            secondaryLang: settings.secondaryLanguage
+          },
+          { timeoutMs: 90000 }
+        );
+        if (activeMenuMode !== "suggestions") return;
         if (!res?.ok) {
-          renderQAView(res?.error || "Request failed.");
+          renderQAView(res?.error || "Request failed.", { openOptions: Boolean(res?.openOptions) });
           return;
         }
         qaHistory.push({ role: "user", text: q });
         qaHistory.push({ role: "assistant", text: (res.result || "").trim() });
         renderQAView();
       } catch (err) {
+        if (activeMenuMode !== "suggestions") return;
         renderQAView(err?.message || "Request failed.");
       }
     };
@@ -1716,6 +2121,7 @@
     askSend.type = "submit";
     askSend.className = "ask-send";
     askSend.textContent = "→";
+    preventBlurOnMouseDown(askSend);
     askForm.appendChild(askInput);
     askForm.appendChild(askSend);
 
@@ -1729,11 +2135,15 @@
 
   function updateFloatingTriggerNow() {
     if (!DomEditor) return;
+    if (activeEditor && activeEditor.isConnected === false) {
+      activeEditor = null;
+    }
+    const deepActive = getDeepActiveElement();
     const editor =
       (activeEditor && DomEditor.isEligibleEditor(activeEditor) && activeEditor) ||
-      DomEditor.resolveEditableTarget(document.activeElement);
+      DomEditor.resolveEditableTarget(deepActive);
 
-    if (editor && (!document.activeElement || editor.contains(document.activeElement) || document.activeElement === editor)) {
+    if (editor && (!deepActive || editor.contains(deepActive) || deepActive === editor)) {
       const extracted = DomEditor.extractSentenceOrSelection(editor);
       if (extracted) {
         if (extracted.mode === "selection") {
@@ -1870,41 +2280,71 @@
   }
 
   // --- DOM Event Listeners ---
-  document.addEventListener("compositionstart", () => {
+  addManagedListener(document, "compositionstart", () => {
     isComposing = true;
   });
 
-  document.addEventListener("compositionend", () => {
+  addManagedListener(document, "compositionend", () => {
     isComposing = false;
   });
 
-  document.addEventListener(
+  addManagedListener(window, "blur", () => {
+    isComposing = false;
+  });
+
+  addManagedListener(
+    document,
     "focusin",
     (e) => {
-      if (!DomEditor) return;
+      if (!DomEditor || !isRuntimeContextAlive()) return;
       const rawTarget = (typeof e.composedPath === "function" && e.composedPath()[0]) || e.target;
       const editor = DomEditor.resolveEditableTarget(rawTarget);
       if (!editor) return;
+      if (editor !== activeEditor) {
+        isComposing = false;
+      }
       activeEditor = editor;
-      ensureLexiconsForActiveLanguages();
+      ensureLexiconsForActiveLanguages({ bypassCooldown: true });
       scheduleFloatingTriggerUpdate();
     },
     true
   );
 
-  document.addEventListener(
+  addManagedListener(
+    document,
     "focusout",
     (e) => {
+      isComposing = false;
       const next = e.relatedTarget;
       const host = document.getElementById(HOST_ID);
-      if (next && host && (next === host || host.contains(next))) {
+      const composedPath = typeof e.composedPath === "function" ? e.composedPath() : [];
+      const fromShadowHost =
+        Boolean(
+          host &&
+            e.target &&
+            (e.target === host || host.contains?.(e.target) || host.shadowRoot?.contains?.(e.target))
+        ) || composedPath.some((node) => node && node.id === HOST_ID);
+
+      if (next && host && (next === host || host.contains?.(next) || host.shadowRoot?.contains?.(next))) {
+        return;
+      }
+      if (activeMenuMode === "suggestions" && (fromShadowHost && !next || !next)) {
         return;
       }
       setTimeout(() => {
-        const currentActive = document.activeElement;
+        if (!stateRecord.active || !isRuntimeContextAlive()) return;
+        const currentActive = getDeepActiveElement();
+        if (
+          currentActive &&
+          host &&
+          (currentActive === host || host.contains?.(currentActive) || host.shadowRoot?.contains?.(currentActive))
+        ) {
+          return;
+        }
         if (!DomEditor?.resolveEditableTarget(currentActive)) {
           hideFloatingTrigger();
           if (activeMenuMode === "uncertain" || activeMenuMode === "suggestions") {
+            clearUncertainState({ keepMenuIfSuggestion: false });
             closeFloatingMenu();
           }
         }
@@ -1913,12 +2353,14 @@
     true
   );
 
-  document.addEventListener(
+  addManagedListener(
+    document,
     "keydown",
     (e) => {
       if (isApplyingExtensionEdit || isComposing || e.isComposing) return;
 
       if (e.key === "Escape") {
+        clearUncertainState({ keepMenuIfSuggestion: false });
         closeFloatingMenu();
         hideUndoPill();
         return;
@@ -1952,7 +2394,7 @@
               matchesCurrent = true;
             }
           } else {
-            const sel = window.getSelection?.();
+            const sel = DomEditor?.getSelectionForNode?.(editor) || window.getSelection?.();
             if (sel && sel.rangeCount > 0 && sel.isCollapsed) {
               const extracted = DomEditor.extractWordBeforeCaret(editor);
               const atCorrectedEnd =
@@ -1988,10 +2430,13 @@
     true
   );
 
-  document.addEventListener(
+  addManagedListener(
+    document,
     "input",
     async (e) => {
-      if (isApplyingExtensionEdit || isComposing || e.isComposing || !DomEditor) return;
+      if (isApplyingExtensionEdit || isComposing || e.isComposing || !DomEditor || !isRuntimeContextAlive()) {
+        return;
+      }
       const rawTarget = (typeof e.composedPath === "function" && e.composedPath()[0]) || e.target;
       const editor = DomEditor.resolveEditableTarget(rawTarget);
       if (!editor) return;
@@ -2011,7 +2456,9 @@
           if (hasAllActiveLexiconsLoaded()) {
             evaluateWordBoundary(editor, extracted);
           } else {
-            await ensureLexiconsForActiveLanguages();
+            scheduleFloatingTriggerUpdate();
+            await ensureLexiconsForActiveLanguages({ bypassCooldown: false });
+            if (!stateRecord.active || !isRuntimeContextAlive() || editor.isConnected === false) return;
             // Re-verify expectedOriginal before applying after async lexicon load
             const stillValid =
               editor.tagName === "INPUT" || editor.tagName === "TEXTAREA"
@@ -2020,7 +2467,7 @@
                     extracted.start,
                     extracted.end
                   ) === extracted.word;
-            if (stillValid) {
+            if (stillValid && hasAllActiveLexiconsLoaded()) {
               evaluateWordBoundary(editor, extracted);
             }
           }
@@ -2032,37 +2479,45 @@
     true
   );
 
-  document.addEventListener(
+  addManagedListener(
+    document,
     "mousedown",
     (e) => {
       if (!activeMenuMode) return;
+      const host = document.getElementById(HOST_ID);
       const path = typeof e.composedPath === "function" ? e.composedPath() : [];
-      const insideHost = path.some((node) => node && node.id === HOST_ID);
+      const insideHost =
+        path.some((node) => node && node.id === HOST_ID) ||
+        Boolean(host && e.target && (e.target === host || host.contains?.(e.target)));
       if (!insideHost) {
-        clearActionMenus();
+        clearUncertainState({ keepMenuIfSuggestion: false });
+        closeFloatingMenu();
       }
     },
     true
   );
 
-  document.addEventListener("mouseup", () => {
+  addManagedListener(document, "mouseup", () => {
     scheduleFloatingTriggerUpdate();
   });
 
-  document.addEventListener("keyup", (e) => {
+  addManagedListener(document, "keyup", (e) => {
     if (e.key === "Escape") return;
     scheduleFloatingTriggerUpdate();
   });
 
-  document.addEventListener("selectionchange", () => {
+  addManagedListener(document, "selectionchange", () => {
     scheduleFloatingTriggerUpdate();
   });
 
-  window.addEventListener(
+  addManagedListener(
+    window,
     "scroll",
     () => {
       if (activeUncertain?.editor && DomEditor) {
-        if (activeUncertain.editor.tagName === "INPUT" || activeUncertain.editor.tagName === "TEXTAREA") {
+        if (activeUncertain.editor.isConnected === false) {
+          clearUncertainState({ keepMenuIfSuggestion: true });
+        } else {
           DomEditor.setUncertainUnderline(activeUncertain.editor, activeUncertain.span);
         }
       }
@@ -2071,49 +2526,55 @@
     true
   );
 
-  window.addEventListener("resize", () => {
+  addManagedListener(window, "resize", () => {
     scheduleFloatingTriggerUpdate();
   });
 
   // --- Storage Change Listener ---
   try {
-    chrome?.storage?.onChanged?.addListener((changes, area) => {
-      if (area !== "local") return;
-      let langChanged = false;
-      if (changes.spellcheckEnabled) {
-        settings.spellcheckEnabled = changes.spellcheckEnabled.newValue !== false;
-        if (!settings.spellcheckEnabled) {
-          clearUncertainState();
-          hideUndoPill();
+    if (chrome?.storage?.onChanged?.addListener) {
+      storageChangedListener = (changes, area) => {
+        if (area !== "local" || !stateRecord.active) return;
+        let langChanged = false;
+        if (changes.spellcheckEnabled) {
+          settings.spellcheckEnabled = changes.spellcheckEnabled.newValue !== false;
+          if (!settings.spellcheckEnabled) {
+            clearUncertainState();
+            hideUndoPill();
+          }
         }
-      }
-      if (changes.autoCorrectEnabled) {
-        settings.autoCorrectEnabled = changes.autoCorrectEnabled.newValue !== false;
-      }
-      if (changes.primaryLanguage) {
-        settings.primaryLanguage =
-          String(changes.primaryLanguage.newValue || "Turkish").trim() || "Turkish";
-        langChanged = true;
-      }
-      if (changes.secondaryLanguage) {
-        settings.secondaryLanguage =
-          String(changes.secondaryLanguage.newValue || "English").trim() || "English";
-        langChanged = true;
-      }
-      if (changes.copyOnReplace) {
-        settings.copyOnReplace = Boolean(changes.copyOnReplace.newValue);
-      }
-      if (langChanged && (lexiconsInitialized || activeEditor)) {
-        ensureLexiconsForActiveLanguages();
-      }
-    });
+        if (changes.autoCorrectEnabled) {
+          settings.autoCorrectEnabled = changes.autoCorrectEnabled.newValue !== false;
+        }
+        if (changes.primaryLanguage) {
+          settings.primaryLanguage =
+            String(changes.primaryLanguage.newValue || "Turkish").trim() || "Turkish";
+          langChanged = true;
+        }
+        if (changes.secondaryLanguage) {
+          settings.secondaryLanguage =
+            String(changes.secondaryLanguage.newValue || "English").trim() || "English";
+          langChanged = true;
+        }
+        if (changes.copyOnReplace) {
+          settings.copyOnReplace = Boolean(changes.copyOnReplace.newValue);
+        }
+        if (changes.userHabits?.newValue) {
+          mergeUserHabits(changes.userHabits.newValue);
+        }
+        if (langChanged && (lexiconsInitialized || activeEditor)) {
+          ensureLexiconsForActiveLanguages({ bypassCooldown: true });
+        }
+      };
+      chrome.storage.onChanged.addListener(storageChangedListener);
+    }
   } catch {
     // Ignore outside extension context
   }
 
   // --- Context Menu / Shortcut Selection & Clipboard Helpers ---
   function captureSelection() {
-    const active = document.activeElement;
+    const active = getDeepActiveElement();
     // Never capture from password fields
     if (active && active.tagName === "INPUT" && String(active.type || "").toLowerCase() === "password") {
       savedSelection = null;
@@ -2145,7 +2606,7 @@
       }
     }
 
-    const sel = window.getSelection();
+    const sel = (DomEditor?.getSelectionForNode?.(active)) || window.getSelection();
     if (sel && sel.rangeCount > 0) {
       const text = sel.toString();
       if (text) {
@@ -2194,6 +2655,7 @@
   function replaceSavedSelection(newText) {
     if (!savedSelection) return false;
     if (savedSelection.kind === "readonly") return false;
+    if (savedSelection.el?.isConnected === false) return false;
 
     if (DomEditor && savedSelection.el) {
       return applyExtensionReplacement(savedSelection.el, savedSelection, newText);
@@ -2203,104 +2665,136 @@
 
   async function presentModalSafely({ title, text, copiedNotice }) {
     if (window !== window.top && chrome?.runtime?.sendMessage) {
-      const relayed = await new Promise((resolve) => {
-        try {
-          chrome.runtime.sendMessage(
-            {
-              type: "relayModalToTopFrame",
-              dialogTitle: title || "Result",
-              text: text || ""
-            },
-            (res) => {
-              if (chrome.runtime?.lastError || !res?.ok) {
-                resolve(false);
-              } else {
-                resolve(true);
-              }
-            }
-          );
-        } catch {
-          resolve(false);
-        }
-      });
-      if (relayed) return;
+      const res = await sendRuntimeMessage(
+        {
+          type: "relayModalToTopFrame",
+          dialogTitle: title || "Result",
+          text: text || ""
+        },
+        { timeoutMs: 5000 }
+      );
+      if (res?.ok) return;
     }
     showModal({ title, text, copiedNotice });
   }
 
   // --- Background Message Listener ---
   try {
-    chrome?.runtime?.onMessage?.addListener((msg, _sender, sendResponse) => {
-      if (!msg || typeof msg !== "object") return false;
+    if (chrome?.runtime?.onMessage?.addListener) {
+      runtimeMessageListener = (msg, _sender, sendResponse) => {
+        if (!stateRecord.active || !msg || typeof msg !== "object") return false;
 
-      if (msg.type === "getSelection") {
-        sendResponse({ text: captureSelection() });
-        return false;
-      }
-
-      if (msg.type === "showLoading") {
-        showToast({ message: msg.message || "Processing...", loading: true, duration: 0 });
-        sendResponse({ ok: true });
-        return false;
-      }
-
-      if (msg.type === "showError") {
-        showToast({
-          message: msg.message || "An error occurred.",
-          variant: "error",
-          duration: 6000,
-          openOptions: Boolean(msg.openOptions)
-        });
-        sendResponse({ ok: true });
-        return false;
-      }
-
-      if (msg.type === "showTopFrameModal") {
-        if (window === window.top) {
-          showModal({
-            title: msg.dialogTitle || "Result",
-            text: msg.text || "",
-            copiedNotice: "Copied to clipboard."
-          });
-          sendResponse({ ok: true });
-        }
-        return false;
-      }
-
-      if (msg.type === "applyResult") {
-        (async () => {
-          if (msg.mode === "replace") {
-            const replaced = replaceSavedSelection(msg.text);
-            if (replaced) {
-              if (msg.copyOnReplace) {
-                await copyText(msg.text);
-              }
-              showToast({
-                message: msg.copyOnReplace
-                  ? "Replaced selection and copied to clipboard."
-                  : "Replaced selection.",
-                variant: "success",
-                duration: 3000
-              });
-              sendResponse({ ok: true, replaced: true });
-              return;
-            }
+        const safeReply = (payload) => {
+          try {
+            sendResponse(payload);
+          } catch {
+            // Ignore closed port
           }
-          await presentModalSafely({
-            title: msg.dialogTitle || "Result",
-            text: msg.text,
-            copiedNotice: msg.copiedNotice || "Copied to clipboard."
-          });
-          sendResponse({ ok: true, replaced: false });
-        })();
-        return true;
-      }
+        };
 
-      return false;
-    });
+        if (msg.type === "getSelection") {
+          safeReply({ text: captureSelection() });
+          return false;
+        }
+
+        if (msg.type === "showLoading") {
+          showToast({ message: msg.message || "Processing...", loading: true, duration: 0 });
+          safeReply({ ok: true });
+          return false;
+        }
+
+        if (msg.type === "showError") {
+          showToast({
+            message: msg.message || "An error occurred.",
+            variant: "error",
+            duration: 6000,
+            openOptions: Boolean(msg.openOptions)
+          });
+          safeReply({ ok: true });
+          return false;
+        }
+
+        if (msg.type === "showTopFrameModal") {
+          if (window === window.top) {
+            showModal({
+              title: msg.dialogTitle || "Result",
+              text: msg.text || "",
+              copiedNotice: "Copied to clipboard."
+            });
+            safeReply({ ok: true });
+          }
+          return false;
+        }
+
+        if (msg.type === "applyResult") {
+          let responded = false;
+          const replyOnce = (payload) => {
+            if (responded) return;
+            responded = true;
+            safeReply(payload);
+          };
+
+          (async () => {
+            try {
+              if (msg.mode === "replace") {
+                const replaced = replaceSavedSelection(msg.text);
+                if (replaced) {
+                  if (msg.copyOnReplace) {
+                    const copied = await copyText(msg.text);
+                    if (!copied) {
+                      await presentModalSafely({
+                        title: msg.dialogTitle || "Result",
+                        text: msg.text,
+                        copiedNotice: msg.copiedNotice || "Copied to clipboard."
+                      });
+                      replyOnce({ ok: true, replaced: true, copied: false });
+                      return;
+                    }
+                  }
+                  showToast({
+                    message: msg.copyOnReplace
+                      ? "Replaced selection and copied to clipboard."
+                      : "Replaced selection.",
+                    variant: "success",
+                    duration: 3000
+                  });
+                  replyOnce({ ok: true, replaced: true });
+                  return;
+                }
+              }
+              await presentModalSafely({
+                title: msg.dialogTitle || "Result",
+                text: msg.text,
+                copiedNotice: msg.copiedNotice || "Copied to clipboard."
+              });
+              replyOnce({ ok: true, replaced: false });
+            } catch (err) {
+              replyOnce({ ok: false, error: err?.message || String(err) });
+            } finally {
+              if (!responded) {
+                replyOnce({ ok: false, error: "applyResult failed unexpectedly." });
+              }
+            }
+          })();
+          return true;
+        }
+
+        return false;
+      };
+      chrome.runtime.onMessage.addListener(runtimeMessageListener);
+    }
   } catch {
     // Ignore outside extension context
   }
 
   loadSettings();
+
+  // Handle late injection into an already-focused editor
+  const initialActive = getDeepActiveElement();
+  const initialEditor = DomEditor?.resolveEditableTarget(initialActive);
+  if (initialEditor) {
+    activeEditor = initialEditor;
+    ensureLexiconsForActiveLanguages({ bypassCooldown: true });
+    scheduleFloatingTriggerUpdate();
+  }
 })();

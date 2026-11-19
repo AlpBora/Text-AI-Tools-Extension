@@ -64,28 +64,79 @@ export async function getLexicon(lang) {
   }
 }
 
-export async function setupContextMenus() {
-  const settings = await getSettings();
-  chrome.contextMenus.removeAll(() => {
-    chrome.contextMenus.create({
-      id: PARENT_MENU_ID,
-      title: "Text AI Tools",
-      contexts: ["selection"]
-    });
+let contextMenuSetupChain = Promise.resolve();
+
+function createContextMenuItems(settings) {
+  const ignoreLastError = () => {
+    void chrome.runtime?.lastError;
+  };
+  try {
+    chrome.contextMenus.create(
+      {
+        id: PARENT_MENU_ID,
+        title: "Text AI Tools",
+        contexts: ["selection"]
+      },
+      ignoreLastError
+    );
 
     for (const action of Object.values(ACTIONS)) {
       const title =
         action.id === "translate"
           ? `Translate (${settings.primaryLanguage} ↔ ${settings.secondaryLanguage})`
           : action.title;
-      chrome.contextMenus.create({
-        id: action.id,
-        parentId: PARENT_MENU_ID,
-        title,
-        contexts: ["selection"]
-      });
+      chrome.contextMenus.create(
+        {
+          id: action.id,
+          parentId: PARENT_MENU_ID,
+          title,
+          contexts: ["selection"]
+        },
+        ignoreLastError
+      );
     }
-  });
+  } catch {
+    // Ignore context menu creation errors on unsupported contexts
+  }
+}
+
+export function setupContextMenus() {
+  const run = async () => {
+    if (!chrome?.contextMenus?.removeAll || !chrome?.contextMenus?.create) return;
+    const settings = await getSettings();
+    await new Promise((resolve) => {
+      let finished = false;
+      const done = () => {
+        if (finished) return;
+        finished = true;
+        resolve();
+      };
+      try {
+        const maybePromise = chrome.contextMenus.removeAll(() => {
+          void chrome.runtime?.lastError;
+          if (!finished) {
+            createContextMenuItems(settings);
+            done();
+          }
+        });
+        if (maybePromise && typeof maybePromise.then === "function") {
+          maybePromise.then(
+            () => {
+              if (!finished) {
+                createContextMenuItems(settings);
+                done();
+              }
+            },
+            () => done()
+          );
+        }
+      } catch {
+        done();
+      }
+    });
+  };
+  contextMenuSetupChain = contextMenuSetupChain.then(run, run);
+  return contextMenuSetupChain;
 }
 
 export async function ensureContentScript(tabId, frameId) {
@@ -99,11 +150,68 @@ export async function ensureContentScript(tabId, frameId) {
   });
 }
 
-function sendMessageToTab(tabId, message, frameId) {
-  if (typeof frameId === "number") {
-    return chrome.tabs.sendMessage(tabId, message, { frameId });
+function sendTabMessageRaw(tabId, message, frameId) {
+  return new Promise((resolve, reject) => {
+    if (!tabId || !chrome?.tabs?.sendMessage) {
+      reject(new Error("Tab messaging unavailable."));
+      return;
+    }
+    let settled = false;
+    const finish = (fn, val) => {
+      if (settled) return;
+      settled = true;
+      fn(val);
+    };
+    const cb = (res) => {
+      const err = chrome.runtime?.lastError;
+      if (err) {
+        finish(reject, new Error(err.message || String(err)));
+      } else {
+        finish(resolve, res);
+      }
+    };
+    try {
+      const maybePromise =
+        typeof frameId === "number"
+          ? chrome.tabs.sendMessage(tabId, message, { frameId }, cb)
+          : chrome.tabs.sendMessage(tabId, message, cb);
+      if (maybePromise && typeof maybePromise.then === "function") {
+        maybePromise.then(
+          (res) => finish(resolve, res),
+          (err) => finish(reject, err)
+        );
+      }
+    } catch (err) {
+      finish(reject, err);
+    }
+  });
+}
+
+export async function trySendMessageToTab(tabId, message, frameId) {
+  if (!tabId) return { ok: false, error: "Missing tabId." };
+  try {
+    const data = await sendTabMessageRaw(tabId, message, frameId);
+    return { ok: true, data };
+  } catch (err) {
+    return { ok: false, error: err?.message || String(err) };
   }
-  return chrome.tabs.sendMessage(tabId, message);
+}
+
+function isExpectedRestrictedInjectionError(err) {
+  const msg = String(err?.message || err || "").toLowerCase();
+  return (
+    msg.includes("cannot access") ||
+    msg.includes("restricted") ||
+    msg.includes("about:") ||
+    msg.includes("orion://") ||
+    msg.includes("chrome://") ||
+    msg.includes("edge://") ||
+    msg.includes("opera://") ||
+    msg.includes("moz-extension://") ||
+    msg.includes("extension gallery") ||
+    msg.includes("frame was removed") ||
+    msg.includes("no tab with id")
+  );
 }
 
 export async function handleTabAction(tabId, actionId, fallbackSelection = "", frameId) {
@@ -114,7 +222,7 @@ export async function handleTabAction(tabId, actionId, fallbackSelection = "", f
   let scriptReady = false;
 
   try {
-    const res = await sendMessageToTab(tabId, { type: "getSelection" }, frameId);
+    const res = await sendTabMessageRaw(tabId, { type: "getSelection" }, frameId);
     selectedText = res?.text || fallbackSelection || "";
     scriptReady = true;
   } catch {
@@ -125,22 +233,20 @@ export async function handleTabAction(tabId, actionId, fallbackSelection = "", f
     try {
       await ensureContentScript(tabId, frameId);
     } catch (err) {
-      console.error("Failed to inject content script:", err);
+      if (!isExpectedRestrictedInjectionError(err)) {
+        console.warn("Failed to inject content script:", err);
+      }
       return;
     }
 
-    try {
-      const res = await sendMessageToTab(tabId, { type: "getSelection" }, frameId);
-      selectedText = res?.text || fallbackSelection || "";
-    } catch {
-      selectedText = fallbackSelection || "";
-    }
+    const probe = await trySendMessageToTab(tabId, { type: "getSelection" }, frameId);
+    selectedText = probe.ok ? probe.data?.text || fallbackSelection || "" : fallbackSelection || "";
   }
 
   const settings = await getSettings();
   const providerCfg = resolveProviderConfig(settings.provider, settings.customBaseUrl);
   if (providerCfg.requiresKey && !settings.apiKey) {
-    await sendMessageToTab(
+    await trySendMessageToTab(
       tabId,
       {
         type: "showError",
@@ -153,7 +259,7 @@ export async function handleTabAction(tabId, actionId, fallbackSelection = "", f
   }
 
   if (!selectedText.trim()) {
-    await sendMessageToTab(
+    await trySendMessageToTab(
       tabId,
       {
         type: "showError",
@@ -164,7 +270,7 @@ export async function handleTabAction(tabId, actionId, fallbackSelection = "", f
     return;
   }
 
-  await sendMessageToTab(
+  await trySendMessageToTab(
     tabId,
     {
       type: "showLoading",
@@ -185,7 +291,7 @@ export async function handleTabAction(tabId, actionId, fallbackSelection = "", f
       secondaryLanguage: settings.secondaryLanguage
     });
 
-    await sendMessageToTab(
+    await trySendMessageToTab(
       tabId,
       {
         type: "applyResult",
@@ -198,14 +304,68 @@ export async function handleTabAction(tabId, actionId, fallbackSelection = "", f
       frameId
     );
   } catch (err) {
-    await sendMessageToTab(
+    await trySendMessageToTab(
       tabId,
       {
         type: "showError",
-        message: `Gemini API request failed: ${err?.message || err}`
+        message: `${providerCfg.label} API request failed: ${err?.message || err}`
       },
       frameId
     );
+  }
+}
+
+export async function openOptionsPageSafely() {
+  const fallbackToTab = async () => {
+    try {
+      if (chrome?.tabs?.create && chrome?.runtime?.getURL) {
+        await chrome.tabs.create({ url: chrome.runtime.getURL("options.html") });
+        return true;
+      }
+    } catch {
+      // Ignore tab fallback errors
+    }
+    return false;
+  };
+
+  if (typeof chrome?.runtime?.openOptionsPage !== "function") {
+    return fallbackToTab();
+  }
+
+  let fellBack = false;
+  const triggerFallback = () => {
+    if (fellBack) return Promise.resolve(true);
+    fellBack = true;
+    return fallbackToTab();
+  };
+
+  try {
+    let syncCallbackErr = null;
+    const maybePromise = chrome.runtime.openOptionsPage(() => {
+      const err = chrome.runtime?.lastError;
+      if (err) {
+        syncCallbackErr = err;
+        void triggerFallback();
+      }
+    });
+    if (maybePromise && typeof maybePromise.then === "function") {
+      await maybePromise;
+    }
+    if (syncCallbackErr) {
+      return await triggerFallback();
+    }
+    return true;
+  } catch {
+    return await triggerFallback();
+  }
+}
+
+function safeSendResponse(sendResponse, payload) {
+  if (typeof sendResponse !== "function") return;
+  try {
+    sendResponse(payload);
+  } catch {
+    // Ignore closed message channel errors (e.g., tab closed or navigated)
   }
 }
 
@@ -313,20 +473,16 @@ export async function handleRuntimeMessage(msg, sender) {
     if (!tabId) {
       return { ok: false, error: "Missing sender tab ID for modal relay." };
     }
-    try {
-      await chrome.tabs.sendMessage(
-        tabId,
-        {
-          type: "showTopFrameModal",
-          dialogTitle: msg.dialogTitle || "Result",
-          text: msg.text || ""
-        },
-        { frameId: 0 }
-      );
-      return { ok: true };
-    } catch (err) {
-      return { ok: false, error: err?.message || String(err) };
-    }
+    const relayRes = await trySendMessageToTab(
+      tabId,
+      {
+        type: "showTopFrameModal",
+        dialogTitle: msg.dialogTitle || "Result",
+        text: msg.text || ""
+      },
+      0
+    );
+    return relayRes.ok ? { ok: true } : { ok: false, error: relayRes.error };
   }
 
   if (msg.type === "askAIQuestion") {
@@ -358,20 +514,24 @@ export async function handleRuntimeMessage(msg, sender) {
   }
 
   if (msg.type === "openOptions") {
-    chrome.runtime.openOptionsPage();
+    await openOptionsPageSafely();
     return { ok: true };
   }
 
   if (msg.type === "checkAndReloadUpdate") {
-    const reloaded = await checkLocalManifestAndReload();
-    if (reloaded) {
-      return { ok: true, reloaded: true };
+    const canReload = typeof chrome?.runtime?.reload === "function";
+    if (canReload) {
+      const reloaded = await checkLocalManifestAndReload({ deferReload: true });
+      if (reloaded) {
+        return { ok: true, reloaded: true };
+      }
     }
     const remoteVersion = await checkRemoteManifestVersion();
     const currentVersion = chrome.runtime.getManifest?.().version || "";
     return {
       ok: true,
       reloaded: false,
+      unsupportedReload: !canReload,
       currentVersion,
       remoteVersion,
       hasUpdate: Boolean(remoteVersion && compareVersions(remoteVersion, currentVersion) > 0)
@@ -395,9 +555,13 @@ export function compareVersions(a, b) {
   return 0;
 }
 
-export async function checkLocalManifestAndReload() {
+export async function checkLocalManifestAndReload({ deferReload = false } = {}) {
   try {
-    if (!chrome?.runtime?.getURL || !chrome?.runtime?.getManifest || !chrome?.runtime?.reload) {
+    if (
+      !chrome?.runtime?.getURL ||
+      !chrome?.runtime?.getManifest ||
+      typeof chrome?.runtime?.reload !== "function"
+    ) {
       return false;
     }
     const res = await fetch(chrome.runtime.getURL("manifest.json"), { cache: "no-store" });
@@ -405,7 +569,19 @@ export async function checkLocalManifestAndReload() {
     const diskManifest = await res.json();
     const runningVersion = chrome.runtime.getManifest().version;
     if (diskManifest?.version && diskManifest.version !== runningVersion) {
-      chrome.runtime.reload();
+      if (deferReload) {
+        setTimeout(() => {
+          try {
+            if (typeof chrome?.runtime?.reload === "function") {
+              chrome.runtime.reload();
+            }
+          } catch {
+            // Ignore reload errors
+          }
+        }, 50);
+      } else {
+        chrome.runtime.reload();
+      }
       return true;
     }
   } catch {
@@ -416,6 +592,7 @@ export async function checkLocalManifestAndReload() {
 
 export async function checkRemoteManifestVersion() {
   try {
+    if (typeof fetch !== "function") return null;
     const res = await fetch(REMOTE_MANIFEST_URL, { cache: "no-store" });
     if (!res.ok) return null;
     const remote = await res.json();
@@ -429,48 +606,81 @@ export async function checkRemoteManifestVersion() {
   }
 }
 
-async function runPeriodicUpdateCheck() {
-  const reloaded = await checkLocalManifestAndReload();
-  if (!reloaded) {
-    await checkRemoteManifestVersion();
-  }
-}
-
 export function registerListeners() {
   if (typeof chrome === "undefined" || !chrome.runtime) return;
 
   chrome.runtime.onInstalled?.addListener(() => {
-    setupContextMenus();
+    void setupContextMenus().catch(() => {});
   });
   chrome.runtime.onStartup?.addListener(() => {
-    setupContextMenus();
-    runPeriodicUpdateCheck();
+    void setupContextMenus().catch(() => {});
   });
 
   chrome.storage?.onChanged?.addListener((changes, area) => {
     if (area === "local" && (changes.primaryLanguage || changes.secondaryLanguage)) {
-      setupContextMenus();
+      void setupContextMenus().catch(() => {});
     }
   });
 
   chrome.contextMenus?.onClicked?.addListener((info, tab) => {
     if (!tab?.id || !ACTIONS[info.menuItemId]) return;
     const frameId = typeof info.frameId === "number" ? info.frameId : 0;
-    handleTabAction(tab.id, info.menuItemId, info.selectionText || "", frameId);
+    Promise.resolve(
+      handleTabAction(tab.id, info.menuItemId, info.selectionText || "", frameId)
+    ).catch(() => {});
   });
 
   chrome.commands?.onCommand?.addListener(async (command) => {
     if (!ACTIONS[command]) return;
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (tab?.id) {
-      handleTabAction(tab.id, command, "", 0);
+    try {
+      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+      const tab = Array.isArray(tabs) ? tabs[0] : null;
+      if (!tab?.id) return;
+
+      let targetFrameId = 0;
+      if (typeof chrome?.scripting?.executeScript === "function") {
+        try {
+          const results = await chrome.scripting.executeScript({
+            target: { tabId: tab.id, allFrames: true },
+            func: () => {
+              const sel = window.getSelection?.()?.toString() || "";
+              const active = document.activeElement;
+              const isInputSel =
+                active &&
+                (active.tagName === "INPUT" || active.tagName === "TEXTAREA") &&
+                (active.selectionEnd ?? 0) > (active.selectionStart ?? 0);
+              const hasSel = Boolean(sel.trim()) || Boolean(isInputSel);
+              const isLeafFocus = document.hasFocus() && active?.tagName !== "IFRAME";
+              return { hasSel, isLeafFocus };
+            }
+          });
+          if (Array.isArray(results)) {
+            const selFrame = results.find((r) => r?.result?.hasSel && typeof r.frameId === "number");
+            const focusFrame = results.find(
+              (r) => r?.result?.isLeafFocus && typeof r.frameId === "number"
+            );
+            if (selFrame) targetFrameId = selFrame.frameId;
+            else if (focusFrame) targetFrameId = focusFrame.frameId;
+          }
+        } catch {
+          targetFrameId = 0;
+        }
+      }
+
+      await handleTabAction(tab.id, command, "", targetFrameId);
+    } catch {
+      // Ignore command errors on closed/restricted tabs
     }
   });
 
   chrome.runtime.onMessage?.addListener((msg, sender, sendResponse) => {
-    if (msg?.type === "openOptions") {
-      chrome.runtime.openOptionsPage();
-      sendResponse({ ok: true });
+    if (!msg || typeof msg !== "object") {
+      return false;
+    }
+
+    if (msg.type === "openOptions") {
+      void openOptionsPageSafely();
+      safeSendResponse(sendResponse, { ok: true });
       return false;
     }
 
@@ -483,13 +693,13 @@ export function registerListeners() {
       "relayModalToTopFrame",
       "checkAndReloadUpdate"
     ]);
-    if (!msg || !asyncTypes.has(msg.type)) {
+    if (!asyncTypes.has(msg.type)) {
       return false;
     }
 
     handleRuntimeMessage(msg, sender)
-      .then((res) => sendResponse(res))
-      .catch((err) => sendResponse({ ok: false, error: err?.message || String(err) }));
+      .then((res) => safeSendResponse(sendResponse, res))
+      .catch((err) => safeSendResponse(sendResponse, { ok: false, error: err?.message || String(err) }));
     return true;
   });
 }
