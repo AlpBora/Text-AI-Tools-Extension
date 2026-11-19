@@ -107,32 +107,64 @@ enum GlassTheme {
     }
 }
 
-final class LiquidGlassContainer: NSVisualEffectView {
-    private let gradientLayer = CAGradientLayer()
+final class GlassGradientBackdropView: NSView {
+    let gradientLayer = CAGradientLayer()
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        material = .hudWindow
-        blendingMode = .behindWindow
-        state = .active
+        wantsLayer = true
+        gradientLayer.startPoint = CGPoint(x: 0.0, y: 1.0)
+        gradientLayer.endPoint = CGPoint(x: 1.0, y: 0.0)
+        layer?.addSublayer(gradientLayer)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func layout() {
+        super.layout()
+        gradientLayer.frame = bounds
+    }
+}
+
+/// Liquid-glass window background. The blur (gray frosted material) and the color gradient live in
+/// separate layers: the opacity setting only fades the blur/glass body, while the gradient keeps
+/// its color density so lowering opacity never washes the theme out to gray.
+final class LiquidGlassContainer: NSView {
+    private let blurView = NSVisualEffectView()
+    private let backdrop = GlassGradientBackdropView()
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
         wantsLayer = true
         layer?.cornerRadius = 16
         layer?.masksToBounds = true
         layer?.borderWidth = 1.0
-        gradientLayer.startPoint = CGPoint(x: 0.0, y: 1.0)
-        gradientLayer.endPoint = CGPoint(x: 1.0, y: 0.0)
-        layer?.insertSublayer(gradientLayer, at: 0)
-        maskImage = Self.makeRoundedMaskImage(radius: 16)
+
+        blurView.material = .hudWindow
+        blurView.blendingMode = .behindWindow
+        blurView.state = .active
+        blurView.maskImage = Self.makeRoundedMaskImage(radius: 16)
+        blurView.frame = bounds
+        blurView.autoresizingMask = [.width, .height]
+        addSubview(blurView)
+
+        backdrop.frame = bounds
+        backdrop.autoresizingMask = [.width, .height]
+        addSubview(backdrop)
+
         applyTheme()
     }
 
     func applyTheme() {
         let p = GlassTheme.current
         let s = GlassTheme.opacityScale
-        layer?.borderColor = NSColor(calibratedRed: p.borderRGB.0, green: p.borderRGB.1, blue: p.borderRGB.2, alpha: 0.38 * max(0.55, s)).cgColor
-        gradientLayer.colors = [
-            NSColor(calibratedRed: p.topRGB.0, green: p.topRGB.1, blue: p.topRGB.2, alpha: 0.56 * s).cgColor,
-            NSColor(calibratedRed: p.bottomRGB.0, green: p.bottomRGB.1, blue: p.bottomRGB.2, alpha: 0.68 * s).cgColor
+        // Blur/glass body follows the slider fully; color gradient only eases slightly so it stays vivid.
+        blurView.alphaValue = s
+        let colorStrength = 0.82 + 0.18 * s
+        layer?.borderColor = NSColor(calibratedRed: p.borderRGB.0, green: p.borderRGB.1, blue: p.borderRGB.2, alpha: 0.38).cgColor
+        backdrop.gradientLayer.colors = [
+            NSColor(calibratedRed: p.topRGB.0, green: p.topRGB.1, blue: p.topRGB.2, alpha: min(1.0, 0.56 * colorStrength + (1.0 - s) * 0.20)).cgColor,
+            NSColor(calibratedRed: p.bottomRGB.0, green: p.bottomRGB.1, blue: p.bottomRGB.2, alpha: min(1.0, 0.68 * colorStrength + (1.0 - s) * 0.16)).cgColor
         ]
     }
 
@@ -149,11 +181,6 @@ final class LiquidGlassContainer: NSVisualEffectView {
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-
-    override func layout() {
-        super.layout()
-        gradientLayer.frame = bounds
-    }
 }
 
 final class GlassActionButton: NSButton {
