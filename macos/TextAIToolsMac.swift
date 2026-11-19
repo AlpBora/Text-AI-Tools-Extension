@@ -596,6 +596,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             defer: false
         )
         win.title = "Text AI Tools — Settings"
+        win.appearance = NSAppearance(named: .darkAqua)
         win.titlebarAppearsTransparent = true
         win.isOpaque = false
         win.backgroundColor = .clear
@@ -716,6 +717,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         _ = makeLabel("Global Shortcut", x: 20, y: y, w: 120)
         let shortcutVal = makeLabel(hotkey.label, x: 145, y: y, w: 145, bold: false, size: 12)
         settingsShortcutLabel = shortcutVal
+        shortcutVal.textColor = .white
         let changeHkBtn = GlassActionButton(frame: NSRect(x: 298, y: y - 4, width: 92, height: 24))
         changeHkBtn.title = "  Change…"
         changeHkBtn.target = ActionTarget.shared
